@@ -2,7 +2,9 @@ import { extension_settings, getContext } from '../../../extensions.js';
 import { POPUP_TYPE, callGenericPopup } from '../../../popup.js';
 import { download, escapeHtml } from '../../../utils.js';
 import { SWIPE_DIRECTION, SWIPE_SOURCE } from '../../../constants.js';
-import { extension_prompt_roles, extension_prompt_types, saveSettingsDebounced, setExtensionPrompt, swipe } from '../../../../script.js';
+import { extension_prompt_roles, extension_prompt_types, name1, saveSettingsDebounced, setExtensionPrompt, swipe } from '../../../../script.js';
+import { power_user } from '../../../power-user.js';
+import { user_avatar } from '../../../personas.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 import { DEFAULT_GLOBAL_SETTINGS, DISPLAY_NAME, LOCAL_STORAGE_KEYS, MODULE_NAME, PANEL_EVENT, PANEL_ID, PROMPT_MODES, SECTION_ORDER } from './src/constants.js';
 import { analysePair } from './src/analysis/analyser.js';
@@ -1943,18 +1945,14 @@ function exportBackup() {
     download(JSON.stringify(payload, null, 2), 'dynamic-persona-manager-backup.json', 'application/json');
 }
 
-function getActiveNativePersonaText(context, state) {
-    const character = Array.isArray(context?.characters) && context.characterId !== undefined
-        ? context.characters[context.characterId]
-        : null;
-    const card = character?.data && typeof character.data === 'object' ? character.data : character;
+function buildNativePersonaTextFromCard(card, fallbackName = '') {
     const parts = [];
     const addPart = (label, value) => {
         const text = String(value || '').trim();
         if (text) parts.push(`${label}:\n${text}`);
     };
 
-    addPart('Name', card?.name || character?.name || state?.persona?.name);
+    addPart('Name', card?.name || fallbackName);
     addPart('Description', card?.description);
     addPart('Personality', card?.personality);
     addPart('Scenario', card?.scenario);
@@ -1973,7 +1971,127 @@ function getActiveNativePersonaText(context, state) {
         );
     }
 
-    return parts.join('\n\n') || state?.persona?.summary || '';
+    return parts.join('\n\n');
+}
+
+function buildNativePersonaTextFromUserPersona(source) {
+    const parts = [];
+    const addPart = (label, value) => {
+        const text = String(value || '').trim();
+        if (text) parts.push(`${label}:\n${text}`);
+    };
+    const descriptor = source.descriptor && typeof source.descriptor === 'object' ? source.descriptor : {};
+    const appendices = Array.isArray(descriptor.appendices) ? descriptor.appendices : [];
+
+    addPart('Name', source.name);
+    addPart('Avatar ID', source.avatarId);
+    addPart('Title', descriptor.title);
+    addPart('Description', descriptor.description);
+
+    if (appendices.length) {
+        addPart(
+            'Persona appendices',
+            appendices
+                .map(appendix => {
+                    const title = appendix?.title || appendix?.name || appendix?.id || 'Appendix';
+                    const content = appendix?.content || appendix?.description || appendix?.text || '';
+                    return [title, content].filter(Boolean).join(':\n');
+                })
+                .filter(Boolean)
+                .join('\n\n'),
+        );
+    }
+
+    addPart('Linked lorebook', descriptor.lorebook);
+    return parts.join('\n\n');
+}
+
+function getActiveNativePersonaSource(context, state) {
+    const character = Array.isArray(context?.characters) && context.characterId !== undefined
+        ? context.characters[context.characterId]
+        : null;
+    const card = character?.data && typeof character.data === 'object' ? character.data : character;
+    const name = card?.name || character?.name || state?.persona?.name || '';
+    const text = buildNativePersonaTextFromCard(card, name) || state?.persona?.summary || '';
+    return {
+        kind: 'active',
+        name,
+        label: `Active character${name ? `: ${name}` : ''}`,
+        text,
+    };
+}
+
+function getSavedNativePersonaSources() {
+    const personas = power_user?.personas && typeof power_user.personas === 'object' ? power_user.personas : {};
+    const descriptions = power_user?.persona_descriptions && typeof power_user.persona_descriptions === 'object'
+        ? power_user.persona_descriptions
+        : {};
+
+    return Object.entries(personas)
+        .map(([avatarId, personaName]) => {
+            const descriptor = descriptions[avatarId] && typeof descriptions[avatarId] === 'object' ? descriptions[avatarId] : {};
+            const name = String(personaName || avatarId || '').trim();
+            const source = {
+                kind: 'saved',
+                avatarId,
+                descriptor,
+                name,
+            };
+            const text = buildNativePersonaTextFromUserPersona(source);
+            if (!text) return null;
+            const isCurrent = avatarId === user_avatar;
+            return {
+                ...source,
+                text,
+                label: `SillyBunny persona${isCurrent ? ' (current)' : ''}: ${name || avatarId}`,
+            };
+        })
+        .filter(Boolean)
+        .sort((a, b) => {
+            if (a.avatarId === user_avatar) return -1;
+            if (b.avatarId === user_avatar) return 1;
+            return a.label.localeCompare(b.label);
+        });
+}
+
+async function chooseNativePersonaSource(context, state) {
+    const activeSource = getActiveNativePersonaSource(context, state);
+    const savedSources = getSavedNativePersonaSources();
+    const sources = [
+        {
+            kind: 'paste',
+            name: state.persona?.name || activeSource.name || name1 || '',
+            label: 'Paste or edit manually',
+            text: activeSource.text,
+        },
+        activeSource,
+        ...savedSources,
+    ].filter(source => source.kind === 'paste' || source.text);
+
+    const optionList = sources
+        .map((source, index) => `<li><b>${index + 1}</b> - ${escapeHtml(source.label)}</li>`)
+        .join('');
+    const choice = await callGenericPopup(
+        `<h3>Analyse native persona</h3><p>Choose a source to convert into a structured DPM persona.</p><ol>${optionList}</ol><p>Enter an option number, or cancel to stop.</p>`,
+        POPUP_TYPE.INPUT,
+        '1',
+        { rows: 1, wide: false },
+    );
+    if (!choice) return null;
+
+    const normalizedChoice = String(choice).trim();
+    if (!/^\d+$/.test(normalizedChoice)) {
+        notify('Native persona analysis cancelled: unknown source.');
+        return null;
+    }
+
+    const index = Number(normalizedChoice) - 1;
+    if (!Number.isInteger(index) || index < 0 || index >= sources.length) {
+        notify('Native persona analysis cancelled: unknown source.');
+        return null;
+    }
+
+    return sources[index];
 }
 
 async function importJson() {
@@ -2028,15 +2146,13 @@ async function analyseNativePersonaImport() {
     const context = getContext();
     const settings = getSettings();
     const { state } = readChatState(context);
-    const character = Array.isArray(context?.characters) && context.characterId !== undefined
-        ? context.characters[context.characterId]
-        : null;
-    const card = character?.data && typeof character.data === 'object' ? character.data : character;
-    const defaultName = state.persona?.name || card?.name || character?.name || '';
+    const source = await chooseNativePersonaSource(context, state);
+    if (!source) return;
+
     const nativeText = await callGenericPopup(
-        '<h3>Analyse native persona</h3><p>Paste an existing SillyBunny/SillyTavern-style persona. DPM will analyse it and convert it into structured JSON for review.</p>',
+        `<h3>Analyse native persona</h3><p>Review or edit the selected source before DPM converts it into structured JSON.</p><p><b>Source:</b> ${escapeHtml(source.label)}</p>`,
         POPUP_TYPE.INPUT,
-        getActiveNativePersonaText(context, state),
+        source.text,
         { rows: 16, wide: true },
     );
     if (!nativeText) return;
@@ -2044,7 +2160,7 @@ async function analyseNativePersonaImport() {
     const suggestedName = await callGenericPopup(
         '<h3>Persona name</h3><p>Optional. Used if the source text does not clearly name the persona.</p>',
         POPUP_TYPE.INPUT,
-        defaultName,
+        source.name || state.persona?.name || name1 || '',
         { rows: 1, wide: false },
     );
     notify('Analysing native persona...');
