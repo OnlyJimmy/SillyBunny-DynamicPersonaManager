@@ -165,7 +165,12 @@ export function normalizeConvertedNativePersona(parsed, { sourceText = '', sugge
     return persona;
 }
 
-export async function analyseNativePersona({ context, nativeText, suggestedName = '', settings = {}, signal = null, generateRaw = null, prompt = null }) {
+export function parseNativePersonaConversionResponse(raw, { nativeText = '', suggestedName = '' } = {}) {
+    const parsed = extractJsonObject(raw);
+    return normalizeConvertedNativePersona(parsed, { sourceText: nativeText, suggestedName });
+}
+
+export async function analyseNativePersona({ context, nativeText, suggestedName = '', settings = {}, signal = null, generateRaw = null, prompt = null, responseLength = null }) {
     const generate = generateRaw || context?.generateRaw;
     if (typeof generate !== 'function') {
         throw new Error('No analysis generation function is available.');
@@ -175,11 +180,16 @@ export async function analyseNativePersona({ context, nativeText, suggestedName 
         : buildNativePersonaConversionPrompt(nativeText, suggestedName);
     const raw = await generate({
         prompt: conversionPrompt,
-        responseLength: Number(settings.nativeConversionTokenAllowance ?? 1800),
+        responseLength: Number(responseLength ?? settings.nativeConversionTokenAllowance ?? 1800),
         trimNames: true,
         cacheScope: 'auxiliary',
         signal,
     });
-    const parsed = extractJsonObject(raw);
-    return normalizeConvertedNativePersona(parsed, { sourceText: nativeText, suggestedName });
+    try {
+        return parseNativePersonaConversionResponse(raw, { nativeText, suggestedName });
+    } catch (error) {
+        error.rawResponse = raw;
+        error.conversionPrompt = conversionPrompt;
+        throw error;
+    }
 }

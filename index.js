@@ -11,7 +11,7 @@ import { analysePair } from './src/analysis/analyser.js';
 import { findLatestCompletedPair, fingerprintPair, hasAnalysedFingerprint, rememberAnalysedFingerprint } from './src/analysis/fingerprints.js';
 import { annotateProposalStaleness, getProposalSourceState } from './src/analysis/staleness.js';
 import { buildFullBackupExport, buildNativePersonaTextExport, buildPersonaExport, buildPlainTextPersonaExport, buildPromptTextExport } from './src/import-export/exporter.js';
-import { analyseNativePersona, buildNativePersonaConversionPrompt } from './src/import-export/native-converter.js';
+import { analyseNativePersona, buildNativePersonaConversionPrompt, parseNativePersonaConversionResponse } from './src/import-export/native-converter.js';
 import { createPersonaFromNativeText, mergeImportedPersona, parseDpmImport } from './src/import-export/importer.js';
 import { simulateOperations } from './src/operations/apply.js';
 import { annotateOperationConflicts, operationHasConflicts } from './src/operations/conflicts.js';
@@ -2186,6 +2186,105 @@ async function importJson() {
     notify('Import completed.');
 }
 
+async function showNativeConversionRecoveryPopup(error, { responseLength = 1800 } = {}) {
+    const rawResponse = String(error?.rawResponse ?? error?.message ?? '').trim();
+    const tokenInputId = 'dpm--native-retry-token-allowance';
+    const popup = new Popup(
+        `<h3>Converter response was not usable JSON</h3>
+        <p>The converter returned text that DPM could not parse. You can edit it into valid JSON and import it, retry generation with adjusted parameters, or cancel.</p>
+        <p class="dpm--danger-text">${escapeHtml(error?.message || 'Unable to parse converter response.')}</p>`,
+        POPUP_TYPE.INPUT,
+        rawResponse,
+        {
+            rows: 18,
+            wide: true,
+            okButton: 'Use edited JSON',
+            cancelButton: 'Cancel',
+            customButtons: [
+                {
+                    text: 'Retry generation',
+                    icon: 'fa-rotate-right',
+                    result: POPUP_RESULT.CUSTOM1,
+                },
+            ],
+            customInputs: [
+                {
+                    id: tokenInputId,
+                    type: 'number',
+                    label: 'Retry token allowance',
+                    defaultState: Number(responseLength || 1800),
+                    min: 256,
+                    max: 12000,
+                    step: 256,
+                },
+            ],
+        },
+    );
+
+    const value = await popup.show();
+    if (popup.result === POPUP_RESULT.AFFIRMATIVE) {
+        return { action: 'use-edited', rawResponse: String(value || '') };
+    }
+    if (popup.result === POPUP_RESULT.CUSTOM1) {
+        const nextResponseLength = Number(popup.inputResults?.get(tokenInputId) || responseLength || 1800);
+        return {
+            action: 'retry',
+            responseLength: Number.isFinite(nextResponseLength) ? nextResponseLength : responseLength,
+        };
+    }
+    return null;
+}
+
+async function convertNativePersonaWithRecovery({ context, nativeText, suggestedName, settings, generateRaw, prompt }) {
+    let currentPrompt = prompt;
+    let responseLength = Number(settings.nativeConversionTokenAllowance ?? 1800);
+    let lastError = null;
+
+    while (true) {
+        if (!lastError) {
+            notify('Analysing native persona...');
+            try {
+                return await analyseNativePersona({
+                    context,
+                    nativeText,
+                    suggestedName,
+                    settings,
+                    generateRaw,
+                    prompt: currentPrompt,
+                    responseLength,
+                });
+            } catch (error) {
+                if (!error || typeof error !== 'object' || !('rawResponse' in error)) throw error;
+                lastError = error;
+            }
+        }
+
+        const recovery = await showNativeConversionRecoveryPopup(lastError, { responseLength });
+        if (!recovery) return null;
+
+        if (recovery.action === 'use-edited') {
+            try {
+                return parseNativePersonaConversionResponse(recovery.rawResponse, { nativeText, suggestedName });
+            } catch (error) {
+                error.rawResponse = recovery.rawResponse;
+                lastError = error;
+            }
+        } else if (recovery.action === 'retry') {
+            responseLength = recovery.responseLength;
+            const reviewedPrompt = await callGenericPopup(
+                '<h3>Review retry prompt</h3><p>Edit the converter prompt before retrying, or cancel to stop.</p>',
+                POPUP_TYPE.INPUT,
+                currentPrompt,
+                { rows: 22, wide: true },
+            );
+            if (!reviewedPrompt) return null;
+            currentPrompt = reviewedPrompt;
+            lastError = null;
+            notify('Retrying native persona analysis...');
+        }
+    }
+}
+
 async function analyseNativePersonaImport() {
     const context = getContext();
     const settings = getSettings();
@@ -2216,8 +2315,7 @@ async function analyseNativePersonaImport() {
     );
     if (!reviewedPrompt) return;
 
-    notify('Analysing native persona...');
-    const converted = await analyseNativePersona({
+    const converted = await convertNativePersonaWithRecovery({
         context,
         nativeText,
         suggestedName,
@@ -2225,6 +2323,7 @@ async function analyseNativePersonaImport() {
         generateRaw: generateDpmRaw,
         prompt: reviewedPrompt,
     });
+    if (!converted) return;
     const reviewedJson = await callGenericPopup(
         '<h3>Review converted persona</h3><p>Edit the generated DPM JSON before importing, or cancel to discard it.</p>',
         POPUP_TYPE.INPUT,
