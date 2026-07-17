@@ -11,7 +11,7 @@ import { analysePair } from './src/analysis/analyser.js';
 import { findLatestCompletedPair, fingerprintPair, hasAnalysedFingerprint, rememberAnalysedFingerprint } from './src/analysis/fingerprints.js';
 import { annotateProposalStaleness, getProposalSourceState } from './src/analysis/staleness.js';
 import { buildFullBackupExport, buildNativePersonaTextExport, buildPersonaExport, buildPlainTextPersonaExport, buildPromptTextExport } from './src/import-export/exporter.js';
-import { analyseNativePersona } from './src/import-export/native-converter.js';
+import { analyseNativePersona, buildNativePersonaConversionPrompt } from './src/import-export/native-converter.js';
 import { createPersonaFromNativeText, mergeImportedPersona, parseDpmImport } from './src/import-export/importer.js';
 import { simulateOperations } from './src/operations/apply.js';
 import { annotateOperationConflicts, operationHasConflicts } from './src/operations/conflicts.js';
@@ -2207,6 +2207,15 @@ async function analyseNativePersonaImport() {
         source.name || state.persona?.name || name1 || '',
         { rows: 1, wide: false },
     );
+    const conversionPrompt = buildNativePersonaConversionPrompt(nativeText, suggestedName);
+    const reviewedPrompt = await callGenericPopup(
+        '<h3>Review converter prompt</h3><p>This is the exact prompt DPM will send to the converter. You can edit it before running analysis, or cancel to stop.</p>',
+        POPUP_TYPE.INPUT,
+        conversionPrompt,
+        { rows: 22, wide: true },
+    );
+    if (!reviewedPrompt) return;
+
     notify('Analysing native persona...');
     const converted = await analyseNativePersona({
         context,
@@ -2214,6 +2223,7 @@ async function analyseNativePersonaImport() {
         suggestedName,
         settings,
         generateRaw: generateDpmRaw,
+        prompt: reviewedPrompt,
     });
     const reviewedJson = await callGenericPopup(
         '<h3>Review converted persona</h3><p>Edit the generated DPM JSON before importing, or cancel to discard it.</p>',

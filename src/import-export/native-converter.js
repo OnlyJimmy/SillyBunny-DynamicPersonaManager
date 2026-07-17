@@ -165,13 +165,16 @@ export function normalizeConvertedNativePersona(parsed, { sourceText = '', sugge
     return persona;
 }
 
-export async function analyseNativePersona({ context, nativeText, suggestedName = '', settings = {}, signal = null, generateRaw = null }) {
+export async function analyseNativePersona({ context, nativeText, suggestedName = '', settings = {}, signal = null, generateRaw = null, prompt = null }) {
     const generate = generateRaw || context?.generateRaw;
     if (typeof generate !== 'function') {
         throw new Error('No analysis generation function is available.');
     }
+    const conversionPrompt = typeof prompt === 'string' && prompt.trim()
+        ? prompt
+        : buildNativePersonaConversionPrompt(nativeText, suggestedName);
     const raw = await generate({
-        prompt: buildNativePersonaConversionPrompt(nativeText, suggestedName),
+        prompt: conversionPrompt,
         responseLength: Number(settings.nativeConversionTokenAllowance ?? 1800),
         trimNames: true,
         cacheScope: 'auxiliary',
