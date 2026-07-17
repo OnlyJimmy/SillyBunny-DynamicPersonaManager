@@ -1,5 +1,5 @@
 import { extension_settings, getContext } from '../../../extensions.js';
-import { POPUP_TYPE, callGenericPopup } from '../../../popup.js';
+import { POPUP_RESULT, POPUP_TYPE, Popup, callGenericPopup } from '../../../popup.js';
 import { download, escapeHtml } from '../../../utils.js';
 import { SWIPE_DIRECTION, SWIPE_SOURCE } from '../../../constants.js';
 import { extension_prompt_roles, extension_prompt_types, name1, saveSettingsDebounced, setExtensionPrompt, swipe } from '../../../../script.js';
@@ -2031,19 +2031,23 @@ function getSavedNativePersonaSources() {
         .map(([avatarId, personaName]) => {
             const descriptor = descriptions[avatarId] && typeof descriptions[avatarId] === 'object' ? descriptions[avatarId] : {};
             const name = String(personaName || avatarId || '').trim();
+            const title = String(descriptor.title || '').trim();
             const source = {
                 kind: 'saved',
                 avatarId,
                 descriptor,
                 name,
+                title,
             };
             const text = buildNativePersonaTextFromUserPersona(source);
             if (!text) return null;
             const isCurrent = avatarId === user_avatar;
+            const optionLabel = `${name || avatarId} - ${title || 'No title'}`;
             return {
                 ...source,
+                optionLabel,
                 text,
-                label: `SillyBunny persona${isCurrent ? ' (current)' : ''}: ${name || avatarId}`,
+                label: `SillyBunny persona${isCurrent ? ' (current)' : ''}: ${optionLabel}`,
             };
         })
         .filter(Boolean)
@@ -2057,41 +2061,81 @@ function getSavedNativePersonaSources() {
 async function chooseNativePersonaSource(context, state) {
     const activeSource = getActiveNativePersonaSource(context, state);
     const savedSources = getSavedNativePersonaSources();
-    const sources = [
-        {
-            kind: 'paste',
-            name: state.persona?.name || activeSource.name || name1 || '',
-            label: 'Paste or edit manually',
-            text: activeSource.text,
-        },
-        activeSource,
-        ...savedSources,
-    ].filter(source => source.kind === 'paste' || source.text);
+    const pasteSource = {
+        kind: 'paste',
+        name: state.persona?.name || activeSource.name || name1 || '',
+        label: 'Paste raw',
+        text: '',
+    };
 
-    const optionList = sources
-        .map((source, index) => `<li><b>${index + 1}</b> - ${escapeHtml(source.label)}</li>`)
+    let selectedAvatarId = '';
+    const personaOptions = savedSources
+        .map(source => `<option value="${escapeHtml(source.avatarId)}">${escapeHtml(source.optionLabel || source.label)}</option>`)
         .join('');
-    const choice = await callGenericPopup(
-        `<h3>Analyse native persona</h3><p>Choose a source to convert into a structured DPM persona.</p><ol>${optionList}</ol><p>Enter an option number, or cancel to stop.</p>`,
-        POPUP_TYPE.INPUT,
-        '1',
-        { rows: 1, wide: false },
-    );
-    if (!choice) return null;
+    const content = `
+        <div class="dpm--native-source-popup">
+            <h3>Analyse native persona</h3>
+            <p>Choose where DPM should read the native persona from.</p>
+            <label class="dpm--native-source-field" for="dpm--native-persona-source">
+                <span>Import from SillyBunny</span>
+                <select id="dpm--native-persona-source" class="text_pole" ${savedSources.length ? '' : 'disabled'}>
+                    <option value="">Select a persona...</option>
+                    ${personaOptions}
+                </select>
+            </label>
+            ${savedSources.length ? '' : '<p class="dpm--muted">No saved SillyBunny personas are available.</p>'}
+        </div>
+    `;
+    const popup = new Popup(content, POPUP_TYPE.TEXT, '', {
+        okButton: false,
+        cancelButton: 'Cancel',
+        wider: true,
+        customButtons: [
+            {
+                text: 'Import from SillyBunny',
+                icon: 'fa-file-import',
+                result: POPUP_RESULT.CUSTOM1,
+                classes: ['dpm--native-source-import'],
+            },
+            {
+                text: 'Paste raw',
+                icon: 'fa-paste',
+                result: POPUP_RESULT.CUSTOM2,
+            },
+            {
+                text: 'Use active card',
+                icon: 'fa-address-card',
+                result: POPUP_RESULT.CUSTOM3,
+            },
+        ],
+        onOpen: (openedPopup) => {
+            const select = openedPopup.dlg.querySelector('#dpm--native-persona-source');
+            const importButton = openedPopup.dlg.querySelector('.dpm--native-source-import');
+            const refreshImportState = () => {
+                selectedAvatarId = String(select?.value || '');
+                importButton?.toggleAttribute('disabled', !selectedAvatarId);
+                importButton?.classList.toggle('disabled', !selectedAvatarId);
+                importButton?.setAttribute('aria-disabled', selectedAvatarId ? 'false' : 'true');
+            };
+            select?.addEventListener('change', refreshImportState);
+            refreshImportState();
+        },
+        onClosing: (closingPopup) => {
+            if (closingPopup.result === POPUP_RESULT.CUSTOM1 && !selectedAvatarId) {
+                notify('Select a SillyBunny persona before importing.');
+                return false;
+            }
+            return true;
+        },
+    });
 
-    const normalizedChoice = String(choice).trim();
-    if (!/^\d+$/.test(normalizedChoice)) {
-        notify('Native persona analysis cancelled: unknown source.');
-        return null;
+    const result = await popup.show();
+    if (result === POPUP_RESULT.CUSTOM1) {
+        return savedSources.find(source => source.avatarId === selectedAvatarId) || null;
     }
-
-    const index = Number(normalizedChoice) - 1;
-    if (!Number.isInteger(index) || index < 0 || index >= sources.length) {
-        notify('Native persona analysis cancelled: unknown source.');
-        return null;
-    }
-
-    return sources[index];
+    if (result === POPUP_RESULT.CUSTOM2) return pasteSource;
+    if (result === POPUP_RESULT.CUSTOM3) return activeSource.text ? activeSource : null;
+    return null;
 }
 
 async function importJson() {

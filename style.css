@@ -214,6 +214,34 @@
     border-color: var(--warning);
 }
 
+.dpm--native-source-popup {
+    display: grid;
+    gap: 12px;
+    text-align: left;
+}
+
+.dpm--native-source-popup h3,
+.dpm--native-source-popup p {
+    margin: 0;
+}
+
+.dpm--native-source-field {
+    display: grid;
+    gap: 6px;
+}
+
+.dpm--native-source-field select {
+    width: 100%;
+    min-height: 32px;
+}
+
+.dpm--native-source-import.disabled,
+.dpm--native-source-import[disabled] {
+    opacity: 0.55;
+    cursor: not-allowed;
+    filter: grayscale(0.2);
+}
+
 .dpm--sticky-actions {
     position: sticky;
     top: 0;
