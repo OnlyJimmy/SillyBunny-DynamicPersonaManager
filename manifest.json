@@ -1,0 +1,12 @@
+{
+    "display_name": "Dynamic Persona Manager",
+    "author": "Codex",
+    "version": "0.1.0",
+    "description": "Chat-bound managed player persona state with a Companion-style drawer and manual editing.",
+    "requires": [],
+    "optional": [],
+    "js": "index.js",
+    "css": "style.css",
+    "homePage": "https://github.com/platberlitz/SillyBunny",
+    "loading_order": 1000
+}
