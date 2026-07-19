@@ -22,6 +22,46 @@ function normalizeStringArray(value) {
         .filter(Boolean);
 }
 
+function firstTextValue(...values) {
+    for (const value of values) {
+        if (typeof value === 'string' && value.trim()) return value.trim();
+    }
+    return '';
+}
+
+function normalizeRelationshipAddValue(base, incoming) {
+    const next = { ...base, ...incoming };
+    next.entityName = firstTextValue(
+        next.entityName,
+        incoming.name,
+        incoming.characterName,
+        incoming.personName,
+        incoming.person,
+        incoming.entity,
+        incoming.target,
+        incoming.targetName,
+    );
+    next.summary = firstTextValue(
+        next.summary,
+        incoming.relationship,
+        incoming.relationshipType,
+        incoming.description,
+        incoming.details,
+    );
+    next.attitude = firstTextValue(next.attitude, incoming.disposition, incoming.feeling, incoming.feelings);
+
+    if (typeof incoming.notes === 'string' && incoming.notes.trim()) {
+        next.notes = [incoming.notes.trim()];
+    }
+    if (typeof incoming.status === 'string' && incoming.status.trim()) {
+        next.statusTags = normalizeStringArray(next.statusTags).includes(incoming.status.trim())
+            ? normalizeStringArray(next.statusTags)
+            : [...normalizeStringArray(next.statusTags), incoming.status.trim()];
+    }
+
+    return next;
+}
+
 export function normalizeOperation(operation) {
     if (!operation || typeof operation !== 'object' || Array.isArray(operation)) {
         throw new Error('Operation must be an object.');
@@ -70,9 +110,13 @@ export function normalizeAddValue(path, value) {
 
     const base = createDefaultCollectionEntry(root);
     const incoming = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
-    return {
+    const next = {
         ...base,
         ...incoming,
         id: typeof incoming.id === 'string' && incoming.id.trim() ? incoming.id : base.id,
     };
+    if (root === 'relationships') {
+        return normalizeRelationshipAddValue(next, incoming);
+    }
+    return next;
 }

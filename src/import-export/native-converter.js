@@ -60,7 +60,18 @@ Return this shape:
   "inventory": [],
   "equipment": [],
   "conditions": [],
-  "relationships": [],
+  "relationships": [
+    {
+      "entityName": "",
+      "entityType": "character",
+      "summary": "",
+      "attitude": "",
+      "trust": null,
+      "affection": null,
+      "respect": null,
+      "fear": null
+    }
+  ],
   "quests": [],
   "goals": [],
   "knowledge": [],

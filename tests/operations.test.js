@@ -36,6 +36,28 @@ test('add operation inserts a collection entry with a stable id', () => {
     assert.match(persona.inventory[0].id, /^item_/);
 });
 
+test('relationship add operation maps common aliases to editable fields', () => {
+    const persona = createBlankPersona({ name: 'Ren' });
+    applyOperation(persona, {
+        type: 'add',
+        path: '/relationships',
+        value: {
+            name: 'Dain',
+            relationship: 'trusted ally',
+            disposition: 'warm',
+            status: 'travelling companion',
+            notes: 'Saved Ren from an ambush.',
+        },
+    });
+
+    assert.equal(persona.relationships.length, 1);
+    assert.equal(persona.relationships[0].entityName, 'Dain');
+    assert.equal(persona.relationships[0].summary, 'trusted ally');
+    assert.equal(persona.relationships[0].attitude, 'warm');
+    assert.deepEqual(persona.relationships[0].statusTags, ['travelling companion']);
+    assert.deepEqual(persona.relationships[0].notes, ['Saved Ren from an ambush.']);
+});
+
 test('remove operation removes array entries by index', () => {
     const persona = createBlankPersona({ name: 'Ren' });
     persona.inventory.push({ id: 'item_1', name: 'Iron key', quantity: 1 });

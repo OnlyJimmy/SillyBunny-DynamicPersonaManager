@@ -15,6 +15,7 @@ Every operation must include an "evidence" string that is an exact short excerpt
 Supported operation types:
 - set: {"type":"set","path":"/summary","oldValue":"","value":"Updated concise summary","category":"overview","targetLabel":"Summary","changeType":"state update","reason":"","evidence":"","confidence":0.8,"importance":"material","severity":"normal"}
 - add: {"type":"add","path":"/inventory","value":{"name":"Iron key","quantity":1},"category":"inventory","targetLabel":"Iron key","changeType":"acquisition","reason":"","evidence":"","confidence":0.8,"importance":"material","severity":"normal"}
+- add relationship: {"type":"add","path":"/relationships","value":{"entityName":"Dain","entityType":"character","summary":"trusted ally","attitude":"warm","trust":70,"affection":40,"respect":60,"fear":0},"category":"relationships","targetLabel":"Dain","changeType":"relationship update","reason":"","evidence":"","confidence":0.8,"importance":"material","severity":"normal"}
 - remove: {"type":"remove","path":"/conditions/0","oldValue":{...},"category":"conditions","targetLabel":"Sprained wrist","changeType":"resolution","reason":"","evidence":"","confidence":0.8,"importance":"material","severity":"normal"}
 
 Optional operation metadata may include "category", "targetLabel", "changeType", "severity", "tags", "transactionId", and "transactionLabel".
