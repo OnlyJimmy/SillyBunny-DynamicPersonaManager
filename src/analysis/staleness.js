@@ -3,13 +3,13 @@ import { fingerprintPair, getActiveMessageText } from './fingerprints.js';
 export function getProposalSourceState(chat, proposal) {
     const source = proposal?.source ?? {};
     if (source.type !== 'latest-pair' || source.assistantMessageId === undefined) {
-        return { stale: false, reason: '' };
+        return { stale: false, reason: '', code: '' };
     }
 
     const assistantIndex = Number(source.assistantMessageId);
     const assistantMessage = Array.isArray(chat) ? chat[assistantIndex] : null;
     if (!assistantMessage || assistantMessage.is_user || assistantMessage.is_system) {
-        return { stale: true, reason: 'Source assistant message is no longer available.' };
+        return { stale: true, reason: 'Source assistant message is no longer available.', code: 'missingAssistant' };
     }
 
     const activeSwipeId = Number.isInteger(assistantMessage.swipe_id) ? assistantMessage.swipe_id : 0;
@@ -18,6 +18,7 @@ export function getProposalSourceState(chat, proposal) {
         return {
             stale: true,
             reason: `Proposal belongs to swipe ${sourceSwipeId + 1}; active swipe is ${activeSwipeId + 1}.`,
+            code: 'swipeMismatch',
         };
     }
 
@@ -25,7 +26,7 @@ export function getProposalSourceState(chat, proposal) {
         const userIndex = Number(source.userMessageId);
         const userMessage = Array.isArray(chat) ? chat[userIndex] : null;
         if (!userMessage || !userMessage.is_user || userMessage.is_system) {
-            return { stale: true, reason: 'Source user message is no longer available.' };
+            return { stale: true, reason: 'Source user message is no longer available.', code: 'missingUser' };
         }
         const activeFingerprint = fingerprintPair({
             userIndex,
@@ -35,11 +36,11 @@ export function getProposalSourceState(chat, proposal) {
             assistantText: getActiveMessageText(assistantMessage),
         });
         if (activeFingerprint !== source.fingerprint) {
-            return { stale: true, reason: 'Source message text has changed since analysis.' };
+            return { stale: true, reason: 'Source message text has changed since analysis.', code: 'fingerprintMismatch' };
         }
     }
 
-    return { stale: false, reason: '' };
+    return { stale: false, reason: '', code: '' };
 }
 
 export function annotateProposalStaleness(chat, proposal) {
@@ -48,5 +49,6 @@ export function annotateProposalStaleness(chat, proposal) {
         ...proposal,
         stale: sourceState.stale,
         staleReason: sourceState.reason,
+        staleCode: sourceState.code,
     };
 }

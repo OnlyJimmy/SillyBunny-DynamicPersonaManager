@@ -273,11 +273,12 @@ test('proposal is active only for the swipe it was generated from', () => {
         { is_user: false, mes: 'Assistant swipe 3', swipes: ['s1', 's2', 's3'], swipe_id: 2 },
     ];
 
-    assert.deepEqual(getProposalSourceState(chat, proposal), { stale: false, reason: '' });
+    assert.deepEqual(getProposalSourceState(chat, proposal), { stale: false, reason: '', code: '' });
 
     chat[1].swipe_id = 4;
     const stale = getProposalSourceState(chat, proposal);
     assert.equal(stale.stale, true);
+    assert.equal(stale.code, 'swipeMismatch');
     assert.match(stale.reason, /swipe 3/);
 
     chat[1].swipe_id = 2;
@@ -308,6 +309,7 @@ test('proposal becomes stale when source text is edited', () => {
 
     const stale = getProposalSourceState(chat, proposal);
     assert.equal(stale.stale, true);
+    assert.equal(stale.code, 'fingerprintMismatch');
     assert.match(stale.reason, /text has changed/);
 });
 
@@ -320,5 +322,6 @@ test('proposal is stale when source assistant message is missing', () => {
         },
     });
     assert.equal(stale.stale, true);
+    assert.equal(stale.code, 'missingAssistant');
     assert.match(stale.reason, /no longer available/);
 });

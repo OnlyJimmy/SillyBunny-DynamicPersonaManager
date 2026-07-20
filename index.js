@@ -762,6 +762,7 @@ function renderPendingBatchToolbar(state) {
             <div class="dpm--button-row">
                 <button class="dpm--action-button dpm--primary-action" type="button" data-action="accept-selected-operations"><i class="fa-solid fa-check-double"></i><span>Accept selected</span></button>
                 <button class="dpm--action-button dpm--danger-action" type="button" data-action="reject-selected-operations"><i class="fa-solid fa-xmark"></i><span>Reject selected</span></button>
+                <button class="dpm--action-button" type="button" data-action="reject-non-current-swipe-operations"><i class="fa-solid fa-layer-group"></i><span>Reject old swipes</span></button>
                 <button class="dpm--action-button" type="button" data-action="reject-all-operations"><i class="fa-solid fa-trash-can"></i><span>Reject all</span></button>
                 <button class="dpm--action-button" type="button" data-action="reanalyse-latest-pair"><i class="fa-solid fa-rotate"></i><span>Reanalyse</span></button>
             </div>
@@ -1066,6 +1067,7 @@ async function onPanelClick(event) {
         if (action === 'reject-operation') rejectPendingOperation(button.dataset.proposalId, button.dataset.operationId);
         if (action === 'accept-selected-operations') acceptSelectedOperations();
         if (action === 'reject-selected-operations') rejectSelectedOperations();
+        if (action === 'reject-non-current-swipe-operations') rejectNonCurrentSwipeOperations();
         if (action === 'reject-all-operations') rejectAllPendingOperations();
         if (action === 'reanalyse-latest-pair') reanalyseLatestPair();
         if (action === 'navigate-source') await navigateToSourceMessage(Number(button.dataset.messageId), button.dataset.swipeId === '' ? null : Number(button.dataset.swipeId));
@@ -1569,6 +1571,28 @@ function rejectSelectedOperations() {
     writeChatState(context, state, { immediate: true });
     renderPanel();
     notify('Selected operations rejected.');
+}
+
+function rejectNonCurrentSwipeOperations() {
+    const context = getContext();
+    const { state } = readChatState(context);
+    let rejected = 0;
+    for (const proposal of state.pendingProposals || []) {
+        const sourceState = getProposalSourceState(context.chat, proposal);
+        if (sourceState.code !== 'swipeMismatch') continue;
+        for (const operation of proposal.operations || []) {
+            if (operation.status !== 'accepted' && operation.status !== 'rejected') {
+                operation.status = 'rejected';
+                rejected += 1;
+            }
+        }
+    }
+    pruneHandledProposals(state);
+    writeChatState(context, state, { immediate: true });
+    renderPanel();
+    notify(rejected
+        ? `Rejected ${rejected} non-current swipe operation${rejected === 1 ? '' : 's'}.`
+        : 'No non-current swipe operations to reject.');
 }
 
 function rejectAllPendingOperations() {
