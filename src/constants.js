@@ -82,6 +82,7 @@ export const DEFAULT_GLOBAL_SETTINGS = Object.freeze({
     historyRetention: 500,
     checkpointInterval: 25,
     evidenceExcerptMaximum: 200,
+    blockChatSendDuringOperation: false,
     debugMode: false,
     defaultSectionVisibility: {},
 });

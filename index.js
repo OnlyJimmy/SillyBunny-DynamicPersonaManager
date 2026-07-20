@@ -52,6 +52,9 @@ let analysisRunId = 0;
 let analysisAbortController = null;
 let scheduledAnalysisTimer = null;
 let renderingPersona = null;
+let activeDpmOperationCount = 0;
+let sendGuardBound = false;
+const sendControlPreviousState = new WeakMap();
 
 const LOCK_MODE_LABELS = Object.freeze({
     [LOCK_MODES.proposalLocked]: 'Block proposals',
@@ -60,6 +63,83 @@ const LOCK_MODE_LABELS = Object.freeze({
     [LOCK_MODES.analysisHidden]: 'Hide from analysis',
     [LOCK_MODES.immutable]: 'Immutable',
 });
+
+function shouldBlockChatSendDuringOperation() {
+    return !!getSettings().blockChatSendDuringOperation && activeDpmOperationCount > 0;
+}
+
+function getSendControls() {
+    return [
+        document.getElementById('send_textarea'),
+        document.getElementById('send_but'),
+    ].filter(Boolean);
+}
+
+function setChatSendBlocked(blocked) {
+    for (const control of getSendControls()) {
+        if (blocked) {
+            if (!sendControlPreviousState.has(control)) {
+                sendControlPreviousState.set(control, {
+                    disabled: !!control.disabled,
+                    ariaDisabled: control.getAttribute('aria-disabled'),
+                    title: control.getAttribute('title'),
+                });
+            }
+            control.disabled = true;
+            control.setAttribute('aria-disabled', 'true');
+            control.setAttribute('title', 'DPM operation in progress');
+            control.classList?.add?.('dpm--send-blocked');
+        } else if (sendControlPreviousState.has(control)) {
+            const previous = sendControlPreviousState.get(control);
+            control.disabled = previous.disabled;
+            if (previous.ariaDisabled === null) control.removeAttribute('aria-disabled');
+            else control.setAttribute('aria-disabled', previous.ariaDisabled);
+            if (previous.title === null) control.removeAttribute('title');
+            else control.setAttribute('title', previous.title);
+            control.classList?.remove?.('dpm--send-blocked');
+            sendControlPreviousState.delete(control);
+        }
+    }
+}
+
+function refreshChatSendGuard() {
+    setChatSendBlocked(shouldBlockChatSendDuringOperation());
+}
+
+function beginDpmOperation() {
+    activeDpmOperationCount += 1;
+    refreshChatSendGuard();
+}
+
+function endDpmOperation() {
+    activeDpmOperationCount = Math.max(0, activeDpmOperationCount - 1);
+    refreshChatSendGuard();
+}
+
+function blockSendEvent(event) {
+    if (!shouldBlockChatSendDuringOperation()) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation?.();
+    notify('DPM operation in progress. Sending is temporarily disabled.', 'warning');
+    return true;
+}
+
+function bindChatSendGuard() {
+    if (sendGuardBound) return;
+    sendGuardBound = true;
+    document.addEventListener('submit', event => {
+        if (event.target?.id === 'send_form') blockSendEvent(event);
+    }, true);
+    document.addEventListener('click', event => {
+        if (event.target?.closest?.('#send_but')) blockSendEvent(event);
+    }, true);
+    document.addEventListener('keydown', event => {
+        if (event.target?.id !== 'send_textarea') return;
+        if (event.key !== 'Enter' || event.shiftKey) return;
+        blockSendEvent(event);
+    }, true);
+}
 
 function getLocalValue(key) {
     try {
@@ -144,29 +224,34 @@ function getSelectedAnalysisProfile() {
 }
 
 async function generateDpmRaw({ prompt, responseLength, signal }) {
-    const profile = getSelectedAnalysisProfile();
-    const contextLimit = Math.max(1000, Number(getSettings().analysisContextLimit || 6000));
-    const maximumCharacters = contextLimit * 4;
-    const requestPrompt = String(prompt || '').length > maximumCharacters
-        ? `[Earlier DPM analysis context omitted to fit the configured limit.]\n\n${String(prompt).slice(-maximumCharacters)}`
-        : prompt;
-    if (!profile) {
-        return getContext().generateRaw({
-            prompt: requestPrompt,
-            responseLength,
-            trimNames: true,
-            cacheScope: 'auxiliary',
-            signal,
-        });
-    }
+    beginDpmOperation();
+    try {
+        const profile = getSelectedAnalysisProfile();
+        const contextLimit = Math.max(1000, Number(getSettings().analysisContextLimit || 6000));
+        const maximumCharacters = contextLimit * 4;
+        const requestPrompt = String(prompt || '').length > maximumCharacters
+            ? `[Earlier DPM analysis context omitted to fit the configured limit.]\n\n${String(prompt).slice(-maximumCharacters)}`
+            : prompt;
+        if (!profile) {
+            return await getContext().generateRaw({
+                prompt: requestPrompt,
+                responseLength,
+                trimNames: true,
+                cacheScope: 'auxiliary',
+                signal,
+            });
+        }
 
-    const response = await ConnectionManagerRequestService.sendRequest(
-        profile.id,
-        requestPrompt,
-        Number(responseLength || getSettings().responseTokenAllowance || 800),
-        { stream: false, signal, extractData: true, includePreset: true, includeInstruct: true },
-    );
-    return String(response?.content || response?.text || response || '').trim();
+        const response = await ConnectionManagerRequestService.sendRequest(
+            profile.id,
+            requestPrompt,
+            Number(responseLength || getSettings().responseTokenAllowance || 800),
+            { stream: false, signal, extractData: true, includePreset: true, includeInstruct: true },
+        );
+        return String(response?.content || response?.text || response || '').trim();
+    } finally {
+        endDpmOperation();
+    }
 }
 
 function refreshPromptInjection() {
@@ -2400,6 +2485,7 @@ function injectSettingsPanel() {
             </div>
             <div class="inline-drawer-content">
                 <label class="checkbox_label"><input id="dpm--global-auto" type="checkbox" ${settings.automaticAnalysisDefault ? 'checked' : ''}> Enable automatic analysis by default after chat activation</label>
+                <label class="checkbox_label"><input id="dpm--block-send-during-operation" type="checkbox" ${settings.blockChatSendDuringOperation ? 'checked' : ''}> Disable chat sending while DPM is analysing or converting</label>
                 <label>Dedicated analysis connection
                     <select id="dpm--analysis-profile" class="text_pole">
                         <option value="">Use current chat connection</option>
@@ -2431,6 +2517,11 @@ function injectSettingsPanel() {
     parent.querySelector('#dpm--global-auto')?.addEventListener('change', event => {
         getSettings().automaticAnalysisDefault = !!event.target.checked;
         saveSettingsDebounced();
+    });
+    parent.querySelector('#dpm--block-send-during-operation')?.addEventListener('change', event => {
+        getSettings().blockChatSendDuringOperation = !!event.target.checked;
+        saveSettingsDebounced();
+        refreshChatSendGuard();
     });
     parent.querySelector('#dpm--analysis-profile')?.addEventListener('change', event => {
         getSettings().analysisProfileId = String(event.target.value || '');
@@ -2549,6 +2640,7 @@ function bootstrap() {
     ensureChatState(getContext());
     ensurePanelDom();
     injectSettingsPanel();
+    bindChatSendGuard();
     bindEvents();
     refreshPromptInjection();
 }

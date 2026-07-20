@@ -697,6 +697,11 @@
     opacity: 0.55;
 }
 
+.dpm--send-blocked {
+    cursor: not-allowed !important;
+    opacity: 0.55 !important;
+}
+
 .dpm--json-editor {
     min-height: 44dvh;
     font-family: var(--monoFontFamily, monospace);
