@@ -1,5 +1,14 @@
 import { parseJsonPointer } from '../utils/paths.js';
 
+const COLLECTION_ITEM_LABEL_FIELDS = Object.freeze([
+    'targetLabel',
+    'entityName',
+    'name',
+    'title',
+    'subject',
+    'fact',
+]);
+
 function pathsOverlap(leftPath, rightPath) {
     const left = parseJsonPointer(leftPath);
     const right = parseJsonPointer(rightPath);
@@ -10,8 +19,64 @@ function pathsOverlap(leftPath, rightPath) {
     return true;
 }
 
+function normalizeConflictLabel(value) {
+    return String(value ?? '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+}
+
+function formatConflictLabel(value) {
+    return String(value ?? '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function getAddOperationCollectionName(operation) {
+    if (operation?.type !== 'add') return '';
+    const parts = parseJsonPointer(operation.path || '');
+    return parts.length === 1 ? parts[0] : '';
+}
+
+function getAddOperationItemLabel(operation) {
+    for (const field of COLLECTION_ITEM_LABEL_FIELDS) {
+        const direct = normalizeConflictLabel(operation?.[field]);
+        if (direct) return direct;
+        const nested = normalizeConflictLabel(operation?.value?.[field]);
+        if (nested) return nested;
+    }
+    return '';
+}
+
+function getAddOperationItemDisplayLabel(operation) {
+    for (const field of COLLECTION_ITEM_LABEL_FIELDS) {
+        const direct = formatConflictLabel(operation?.[field]);
+        if (direct) return direct;
+        const nested = formatConflictLabel(operation?.value?.[field]);
+        if (nested) return nested;
+    }
+    return '';
+}
+
+function collectionAddsConflict(left, right) {
+    const leftCollection = getAddOperationCollectionName(left);
+    const rightCollection = getAddOperationCollectionName(right);
+    if (!leftCollection || leftCollection !== rightCollection) return null;
+
+    const leftLabel = getAddOperationItemLabel(left);
+    const rightLabel = getAddOperationItemLabel(right);
+    if (leftLabel && rightLabel && leftLabel !== rightLabel) return '';
+    if (leftLabel && rightLabel && leftLabel === rightLabel) {
+        return `Both operations add ${getAddOperationItemDisplayLabel(left) || leftLabel} to /${leftCollection}.`;
+    }
+
+    return `Both operations add entries to /${leftCollection} without enough target detail to prove they are distinct.`;
+}
+
 function operationConflictReason(left, right) {
     if (!left?.path || !right?.path) return '';
+    const addConflict = collectionAddsConflict(left, right);
+    if (addConflict !== null) return addConflict;
     if (!pathsOverlap(left.path, right.path)) return '';
     if (left.path === right.path) return `Both operations target ${left.path}.`;
     return `Operations target overlapping paths: ${left.path} and ${right.path}.`;

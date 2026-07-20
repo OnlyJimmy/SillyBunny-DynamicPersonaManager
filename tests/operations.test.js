@@ -199,6 +199,42 @@ test('conflict annotation flags overlapping pending paths', () => {
     assert.equal(operationHasConflicts(proposals[2].operations[0]), true);
 });
 
+test('conflict annotation allows distinct collection add targets', () => {
+    const proposals = annotateOperationConflicts([
+        createProposal({
+            personaId: 'persona_1',
+            summary: 'Add first relationship',
+            operations: [{ type: 'add', path: '/relationships', value: { entityName: 'Dain', summary: 'trusted ally' } }],
+        }),
+        createProposal({
+            personaId: 'persona_1',
+            summary: 'Add second relationship',
+            operations: [{ type: 'add', path: '/relationships', value: { entityName: 'Mira', summary: 'rival' } }],
+        }),
+    ]);
+
+    assert.equal(operationHasConflicts(proposals[0].operations[0]), false);
+    assert.equal(operationHasConflicts(proposals[1].operations[0]), false);
+});
+
+test('conflict annotation flags duplicate collection add targets', () => {
+    const proposals = annotateOperationConflicts([
+        createProposal({
+            personaId: 'persona_1',
+            summary: 'Add relationship',
+            operations: [{ type: 'add', path: '/relationships', value: { entityName: 'Dain', summary: 'trusted ally' } }],
+        }),
+        createProposal({
+            personaId: 'persona_1',
+            summary: 'Add duplicate relationship',
+            operations: [{ type: 'add', path: '/relationships', value: { name: 'Dain', relationship: 'friendly rival' } }],
+        }),
+    ]);
+
+    assert.equal(operationHasConflicts(proposals[0].operations[0]), true);
+    assert.equal(operationHasConflicts(proposals[1].operations[0]), true);
+});
+
 test('conflict annotation treats same-proposal transactions as one unit', () => {
     const proposal = createProposal({
         personaId: 'persona_1',
