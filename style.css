@@ -2,11 +2,11 @@
     position: fixed;
     z-index: calc(var(--sb-z-popout, 4000) - 1);
     width: auto;
-    min-width: 36px;
+    min-width: 32px;
     min-height: 0;
     border: 1px solid var(--SmartThemeBorderColor);
     border-color: color-mix(in srgb, var(--SmartThemeBorderColor, #555) 60%, transparent);
-    border-radius: 10px 0 0 10px;
+    border-radius: 0;
     background: var(--SmartThemeBlurTintColor);
     background: color-mix(in srgb, var(--SmartThemeBlurTintColor, #222) 88%, #000);
     color: var(--SmartThemeBodyColor);
@@ -16,7 +16,7 @@
     align-items: center;
     justify-content: center;
     gap: 6px;
-    padding: 10px 7px;
+    padding: 9px 6px;
     margin: 0;
     box-shadow: none;
     font: inherit;
@@ -61,13 +61,14 @@
 
 #dpm--panel-handle[data-edge="right"] {
     border-right: none;
-    padding-right: calc(7px + env(safe-area-inset-right, 0px));
+    border-radius: 10px 0 0 10px;
+    padding-right: calc(5px + env(safe-area-inset-right, 0px));
 }
 
 #dpm--panel-handle[data-edge="left"] {
     border-left: none;
     border-radius: 0 10px 10px 0;
-    padding-left: calc(7px + env(safe-area-inset-left, 0px));
+    padding-left: calc(5px + env(safe-area-inset-left, 0px));
 }
 
 #dpm--panel-handle[data-edge="top"],
@@ -745,6 +746,37 @@
 }
 
 @media (max-width: 640px) {
+    #dpm--panel-handle {
+        min-width: 30px;
+        gap: 5px;
+        padding: 8px 5px;
+        border-radius: 0;
+    }
+
+    #dpm--panel-handle[data-edge="right"] {
+        border-radius: 8px 0 0 8px;
+        padding-right: calc(3px + env(safe-area-inset-right, 0px));
+    }
+
+    #dpm--panel-handle[data-edge="left"] {
+        border-radius: 0 8px 8px 0;
+        padding-left: calc(3px + env(safe-area-inset-left, 0px));
+    }
+
+    #dpm--panel-handle[data-edge="top"] {
+        border-radius: 0 0 8px 8px;
+        padding-top: calc(5px + env(safe-area-inset-top, 0px));
+    }
+
+    #dpm--panel-handle[data-edge="bottom"] {
+        border-radius: 8px 8px 0 0;
+        padding-bottom: calc(5px + env(safe-area-inset-bottom, 0px));
+    }
+
+    #dpm--panel-handle-label {
+        font-size: calc(var(--mainFontSize) * 0.68);
+    }
+
     #dpm--panel {
         width: min(100vw, 420px);
     }
