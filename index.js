@@ -506,7 +506,7 @@ function renderCharacterTab(state) {
     renderingPersona = state.persona;
     return `
         <div class="dpm--sticky-actions">
-            <label class="checkbox_label"><input id="dpm--enabled" type="checkbox" ${state.enabled ? 'checked' : ''}> Enabled for this chat</label>
+            <label class="checkbox_label dpm--enabled-toggle"><input id="dpm--enabled" type="checkbox" ${state.enabled ? 'checked' : ''}> <span class="dpm--enabled-label-full">Enabled for this chat</span><span class="dpm--enabled-label-short">Enabled</span></label>
             <div class="dpm--button-row">
                 <button class="dpm--action-button dpm--primary-action" type="button" data-action="save-section-editor"><i class="fa-solid fa-floppy-disk"></i><span>Save edits</span></button>
                 <button class="dpm--action-button" type="button" data-action="export-persona-text"><i class="fa-solid fa-file-lines"></i><span>Export text</span></button>

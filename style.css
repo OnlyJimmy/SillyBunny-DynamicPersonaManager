@@ -261,6 +261,10 @@
     min-width: 0;
 }
 
+.dpm--enabled-label-short {
+    display: none;
+}
+
 .dpm--sticky-actions > .dpm--button-row {
     flex: 0 1 auto;
     justify-content: flex-end;
@@ -759,16 +763,43 @@
     }
 
     .dpm--sticky-actions {
-        align-items: stretch;
-        flex-direction: column;
+        align-items: center;
+        flex-direction: row;
+        gap: 6px;
+        margin: 0 -10px 8px;
+        padding: 6px 10px;
+    }
+
+    .dpm--sticky-actions > .checkbox_label {
+        flex: 0 0 auto;
+        min-height: 32px;
+        margin: 0;
+        white-space: nowrap;
+    }
+
+    .dpm--enabled-label-full {
+        display: none;
+    }
+
+    .dpm--enabled-label-short {
+        display: inline;
     }
 
     .dpm--sticky-actions > .dpm--button-row {
-        justify-content: stretch;
+        flex: 1 1 auto;
+        flex-wrap: nowrap;
+        justify-content: flex-start;
+        gap: 6px;
+        min-width: 0;
+        overflow-x: auto;
+        scrollbar-width: thin;
     }
 
     .dpm--sticky-actions .dpm--action-button {
-        flex: 1 1 0;
+        flex: 0 0 auto;
+        min-height: 32px;
+        padding: 5px 8px;
+        font-size: 0.92em;
     }
 
     .dpm--field-grid,
