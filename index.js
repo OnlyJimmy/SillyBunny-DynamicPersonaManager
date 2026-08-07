@@ -922,7 +922,8 @@ function renderPendingProposal(proposal) {
 
 function renderPendingOperation(proposal, operation) {
     const conflictCount = operation.conflicts?.length || 0;
-    const isBlocked = proposal.stale || operationHasConflicts(operation);
+    const hasConflicts = operationHasConflicts(operation);
+    const isBlocked = proposal.stale || hasConflicts;
     const transactionLabel = operation.transactionLabel || operation.transactionId;
     const sourceAnchor = getOperationSourceAnchor(proposal, operation);
     const title = operation.targetLabel || operation.path;
@@ -950,6 +951,7 @@ function renderPendingOperation(proposal, operation) {
             ${operation.type !== 'remove' ? `<label>Proposed value<textarea class="text_pole" readonly>${escapeHtml(stringifyPreview(operation.value))}</textarea></label>` : ''}
             <div class="dpm--button-row">
                 <button class="dpm--action-button dpm--primary-action" type="button" data-action="accept-operation" data-proposal-id="${escapeHtml(proposal.proposalId)}" data-operation-id="${escapeHtml(operation.operationId)}" ${isBlocked ? 'disabled' : ''}><i class="fa-solid fa-check"></i><span>${operation.transactionId ? 'Accept transaction' : 'Accept'}</span></button>
+                ${hasConflicts && !proposal.stale ? `<button class="dpm--action-button dpm--danger-action" type="button" data-action="force-accept-operation" data-proposal-id="${escapeHtml(proposal.proposalId)}" data-operation-id="${escapeHtml(operation.operationId)}"><i class="fa-solid fa-triangle-exclamation"></i><span>${operation.transactionId ? 'Force transaction' : 'Force accept'}</span></button>` : ''}
                 <button class="dpm--action-button" type="button" data-action="edit-operation" data-proposal-id="${escapeHtml(proposal.proposalId)}" data-operation-id="${escapeHtml(operation.operationId)}"><i class="fa-solid fa-pen"></i><span>Edit</span></button>
                 <button class="dpm--action-button dpm--danger-action" type="button" data-action="reject-operation" data-proposal-id="${escapeHtml(proposal.proposalId)}" data-operation-id="${escapeHtml(operation.operationId)}"><i class="fa-solid fa-xmark"></i><span>Reject</span></button>
             </div>
@@ -1148,6 +1150,7 @@ async function onPanelClick(event) {
         if (action === 'add-lock') addLockFromControl(button);
         if (action === 'remove-lock') removeLock(button.dataset.lockId);
         if (action === 'accept-operation') acceptPendingOperation(button.dataset.proposalId, button.dataset.operationId);
+        if (action === 'force-accept-operation') await forceAcceptPendingOperation(button.dataset.proposalId, button.dataset.operationId);
         if (action === 'edit-operation') await editPendingOperation(button.dataset.proposalId, button.dataset.operationId);
         if (action === 'reject-operation') rejectPendingOperation(button.dataset.proposalId, button.dataset.operationId);
         if (action === 'accept-selected-operations') acceptSelectedOperations();
@@ -1488,7 +1491,7 @@ function getConflictScope(state, proposal) {
         : [...proposals, proposal];
 }
 
-function commitProposalOperations(context, state, proposal, operations) {
+function commitProposalOperations(context, state, proposal, operations, { ignoreConflicts = false } = {}) {
     if (!state.persona) throw new Error('No persona exists to update.');
     const sourceState = getProposalSourceState(context.chat, proposal);
     if (sourceState.stale) {
@@ -1497,9 +1500,11 @@ function commitProposalOperations(context, state, proposal, operations) {
     annotateOperationConflicts(getConflictScope(state, proposal));
     const pendingOperations = operations.filter(operation => operation.status !== 'accepted' && operation.status !== 'rejected');
     if (!pendingOperations.length) return 0;
-    const conflicted = pendingOperations.find(operationHasConflicts);
-    if (conflicted) {
-        throw new Error(`Cannot accept conflicted operation at ${conflicted.path}. Resolve or reject the conflicting proposal first.`);
+    if (!ignoreConflicts) {
+        const conflicted = pendingOperations.find(operationHasConflicts);
+        if (conflicted) {
+            throw new Error(`Cannot accept conflicted operation at ${conflicted.path}. Resolve or reject the conflicting proposal first.`);
+        }
     }
 
     const before = cloneJson(state.persona);
@@ -1515,7 +1520,9 @@ function commitProposalOperations(context, state, proposal, operations) {
         state,
         before,
         state.persona,
-        transaction ? `Accepted transaction: ${label}` : `Accepted proposal: ${label}`,
+        transaction
+            ? `${ignoreConflicts ? 'Force accepted transaction' : 'Accepted transaction'}: ${label}`
+            : `${ignoreConflicts ? 'Force accepted proposal' : 'Accepted proposal'}: ${label}`,
         {
             sourceType: 'proposal',
             sourceProposalId: proposal.proposalId,
@@ -1530,6 +1537,12 @@ function commitProposalOperation(context, state, proposal, operation) {
     return commitProposalOperations(context, state, proposal, getPendingTransactionOperations(proposal, operation));
 }
 
+function getConflictWarningText(operations) {
+    const conflictCount = operations.reduce((count, operation) => count + (operation.conflicts?.length || 0), 0);
+    const operationCount = operations.length;
+    return `${operationCount} operation${operationCount === 1 ? '' : 's'} will be committed while bypassing ${conflictCount} detected conflict${conflictCount === 1 ? '' : 's'}.`;
+}
+
 function acceptPendingOperation(proposalId, operationId) {
     const context = getContext();
     const { state } = readChatState(context);
@@ -1540,6 +1553,28 @@ function acceptPendingOperation(proposalId, operationId) {
     refreshPromptInjection();
     renderPanel();
     notify(acceptedCount > 1 ? `Accepted ${acceptedCount} transaction operations.` : 'Pending operation accepted.');
+}
+
+async function forceAcceptPendingOperation(proposalId, operationId) {
+    const context = getContext();
+    const { state } = readChatState(context);
+    const { proposal, operation } = findPendingOperation(state, proposalId, operationId);
+    annotateOperationConflicts(getConflictScope(state, proposal));
+    const operations = getPendingTransactionOperations(proposal, operation);
+    const confirmed = await callGenericPopup(
+        `<h3>Force accept pending change?</h3><p>${escapeHtml(getConflictWarningText(operations))}</p><p>This bypasses conflict detection only. Stale-source checks, locks, old-value checks, operation simulation, and schema validation still apply.</p>`,
+        POPUP_TYPE.CONFIRM,
+        '',
+        { okButton: 'Force accept', cancelButton: 'Cancel' },
+    );
+    if (!confirmed) return;
+
+    const acceptedCount = commitProposalOperations(context, state, proposal, operations, { ignoreConflicts: true });
+    pruneHandledProposals(state);
+    writeChatState(context, state, { immediate: true });
+    refreshPromptInjection();
+    renderPanel();
+    notify(acceptedCount > 1 ? `Force accepted ${acceptedCount} transaction operations.` : 'Pending operation force accepted.', 'warning');
 }
 
 function getSelectedPendingOperationIds() {
