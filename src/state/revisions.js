@@ -1,4 +1,5 @@
 import { CHECKPOINT_SCHEMA, CHECKPOINT_VERSION, REVISION_SCHEMA, REVISION_VERSION } from '../constants.js';
+import { getActiveMessageText } from '../analysis/fingerprints.js';
 import { cloneJson } from '../utils/cloning.js';
 import { createId } from '../utils/ids.js';
 import { hashJson } from '../utils/hashing.js';
@@ -49,10 +50,43 @@ function anchorSwipeId(anchor) {
     return Number.isInteger(anchor?.assistantSwipeId) ? anchor.assistantSwipeId : null;
 }
 
-function checkpointMatchesActiveBranch(checkpoint, activeAnchor) {
+function getMessageTextForSwipe(message, swipeId = null) {
+    if (!message || typeof message !== 'object') return '';
+    if (Number.isInteger(swipeId) && Array.isArray(message.swipes) && typeof message.swipes[swipeId] === 'string') {
+        return message.swipes[swipeId];
+    }
+    return getActiveMessageText(message);
+}
+
+function anchorMatchesChat(checkpointAnchor, chat) {
+    if (!checkpointAnchor?.fingerprint || !Array.isArray(chat)) return true;
+    if (checkpointAnchor.type !== 'latest-pair') return true;
+
+    const userIndex = Number(checkpointAnchor.userMessageId);
+    const assistantIndex = Number(checkpointAnchor.assistantMessageId);
+    if (!Number.isInteger(userIndex) || !Number.isInteger(assistantIndex)) return false;
+
+    const userMessage = chat[userIndex];
+    const assistantMessage = chat[assistantIndex];
+    if (!userMessage || !assistantMessage) return false;
+
+    const assistantSwipeId = anchorSwipeId(checkpointAnchor) ?? 0;
+    const fingerprint = hashJson({
+        userIndex,
+        assistantIndex,
+        assistantSwipeId,
+        userText: getMessageTextForSwipe(userMessage),
+        assistantText: getMessageTextForSwipe(assistantMessage, assistantSwipeId),
+    });
+
+    return fingerprint === checkpointAnchor.fingerprint;
+}
+
+function checkpointMatchesActiveBranch(checkpoint, activeAnchor, chat = null) {
     const checkpointIndex = anchorMessageIndex(checkpoint?.sourceAnchor);
     const activeIndex = anchorMessageIndex(activeAnchor);
     if (!Number.isFinite(checkpointIndex) || !Number.isFinite(activeIndex)) return false;
+    if (!anchorMatchesChat(checkpoint.sourceAnchor, chat)) return false;
     if (checkpointIndex < activeIndex) return true;
     if (checkpointIndex > activeIndex) return false;
 
@@ -62,12 +96,12 @@ function checkpointMatchesActiveBranch(checkpoint, activeAnchor) {
     return checkpointSwipe === activeSwipe;
 }
 
-export function findNearestCheckpointForAnchor(checkpoints, activeAnchor, currentPersona = null) {
+export function findNearestCheckpointForAnchor(checkpoints, activeAnchor, currentPersona = null, chat = null) {
     if (!Array.isArray(checkpoints) || !activeAnchor) return null;
     const currentHash = currentPersona ? hashJson(currentPersona) : '';
     const candidates = checkpoints
         .filter(checkpoint => checkpoint?.persona && checkpoint?.sourceAnchor)
-        .filter(checkpoint => checkpointMatchesActiveBranch(checkpoint, activeAnchor))
+        .filter(checkpoint => checkpointMatchesActiveBranch(checkpoint, activeAnchor, chat))
         .sort((left, right) => {
             const leftIndex = anchorMessageIndex(left.sourceAnchor);
             const rightIndex = anchorMessageIndex(right.sourceAnchor);
@@ -79,7 +113,7 @@ export function findNearestCheckpointForAnchor(checkpoints, activeAnchor, curren
     return checkpoint;
 }
 
-export function findPreviousCheckpointBeforeAnchor(checkpoints, activeAnchor, currentPersona = null) {
+export function findPreviousCheckpointBeforeAnchor(checkpoints, activeAnchor, currentPersona = null, chat = null) {
     if (!Array.isArray(checkpoints) || !activeAnchor) return null;
     const activeIndex = anchorMessageIndex(activeAnchor);
     if (!Number.isFinite(activeIndex)) return null;
@@ -88,7 +122,9 @@ export function findPreviousCheckpointBeforeAnchor(checkpoints, activeAnchor, cu
         .filter(item => item?.persona && item?.sourceAnchor)
         .filter(item => {
             const checkpointIndex = anchorMessageIndex(item.sourceAnchor);
-            return Number.isFinite(checkpointIndex) && checkpointIndex < activeIndex;
+            return Number.isFinite(checkpointIndex)
+                && checkpointIndex < activeIndex
+                && anchorMatchesChat(item.sourceAnchor, chat);
         })
         .sort((left, right) => {
             const leftIndex = anchorMessageIndex(left.sourceAnchor);

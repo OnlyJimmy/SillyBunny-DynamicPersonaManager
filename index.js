@@ -874,8 +874,9 @@ function renderStreamlinedModeNotice(state) {
 
 function renderBranchCheckpointNotice(state) {
     if (!state?.persona) return '';
-    const activeAnchor = getRevisionSourceAnchor(getContext());
-    const checkpoint = findNearestCheckpointForAnchor(state.checkpoints, activeAnchor, state.persona);
+    const context = getContext();
+    const activeAnchor = getRevisionSourceAnchor(context);
+    const checkpoint = findNearestCheckpointForAnchor(state.checkpoints, activeAnchor, state.persona, context.chat);
     if (!checkpoint) return '';
     return `
         <section class="dpm--branch-checkpoint-notice">
@@ -1839,7 +1840,7 @@ function syncPersonaToActiveBranch(reason = 'branch-sync') {
     if (!state.persona || state.chatSettings?.branchStateSync === false) return false;
 
     const activeAnchor = getRevisionSourceAnchor(context);
-    const checkpoint = findNearestCheckpointForAnchor(state.checkpoints, activeAnchor, state.persona);
+    const checkpoint = findNearestCheckpointForAnchor(state.checkpoints, activeAnchor, state.persona, context.chat);
     if (!checkpoint?.persona) return false;
 
     return applyBranchCheckpointSync(context, state, checkpoint, activeAnchor, reason);
@@ -1851,7 +1852,7 @@ function syncPersonaToPreviousPairCheckpoint(reason = 'pair-edited') {
     if (!state.persona || state.chatSettings?.branchStateSync === false) return false;
 
     const activeAnchor = getRevisionSourceAnchor(context);
-    const checkpoint = findPreviousCheckpointBeforeAnchor(state.checkpoints, activeAnchor, state.persona);
+    const checkpoint = findPreviousCheckpointBeforeAnchor(state.checkpoints, activeAnchor, state.persona, context.chat);
     if (!checkpoint?.persona) return false;
 
     return applyBranchCheckpointSync(context, state, checkpoint, activeAnchor, reason);
