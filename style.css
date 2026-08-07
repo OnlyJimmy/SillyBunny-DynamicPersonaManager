@@ -400,6 +400,10 @@
     margin-bottom: 0;
 }
 
+.dpm--entry-collapsed .dpm--entry-fields {
+    display: none;
+}
+
 .dpm--entry-toggle {
     display: inline-flex;
     align-items: center;
