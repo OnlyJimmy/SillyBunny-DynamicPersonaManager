@@ -36,7 +36,9 @@ import {
     createDefaultCollectionEntry,
     getCollectionItemTitle,
     listToText,
+    readCollapsedEntries,
     readCollapsedSections,
+    storeCollapsedEntries,
     storeCollapsedSections,
     textToList,
 } from './src/ui/character-editor.js';
@@ -48,6 +50,7 @@ let activeTab = getLocalValue(LOCAL_STORAGE_KEYS.lastTab) || 'character';
 let panelLocked = getLocalValue(LOCAL_STORAGE_KEYS.panelLocked) === 'true';
 let cleanupHandle = null;
 let collapsedSections = readCollapsedSections();
+let collapsedEntries = readCollapsedEntries();
 let analysisRunId = 0;
 let analysisAbortController = null;
 let scheduledAnalysisTimer = null;
@@ -528,6 +531,14 @@ function isSectionCollapsed(sectionName) {
     return collapsedSections.has(sectionName);
 }
 
+function getEntryCollapseKey(collectionName, entry, index) {
+    return `${collectionName}:${entry?.id || `index-${index}`}`;
+}
+
+function isEntryCollapsed(collectionName, entry, index) {
+    return collapsedEntries.has(getEntryCollapseKey(collectionName, entry, index));
+}
+
 function editorPathToPointer(path) {
     if (!path) return '';
     if (path.startsWith('/')) return path;
@@ -759,10 +770,16 @@ function renderCollectionSection(persona, collectionName) {
 function renderCollectionEntry(collectionName, entry, index) {
     const definitions = COLLECTION_FIELD_DEFINITIONS[collectionName] || [['name', 'Name', 'text']];
     const entryPath = `/${collectionName}/${index}`;
+    const collapseKey = getEntryCollapseKey(collectionName, entry, index);
+    const collapsed = isEntryCollapsed(collectionName, entry, index);
+    const title = getCollectionItemTitle(collectionName, entry);
     return `
-        <article class="dpm--entry" data-collection="${escapeHtml(collectionName)}" data-index="${index}">
+        <article class="dpm--entry ${collapsed ? 'dpm--entry-collapsed' : ''}" data-collection="${escapeHtml(collectionName)}" data-index="${index}" data-entry-key="${escapeHtml(collapseKey)}">
             <div class="dpm--entry-header">
-                <strong>${escapeHtml(getCollectionItemTitle(collectionName, entry))}</strong>
+                <button class="dpm--entry-toggle" type="button" data-action="toggle-entry" data-entry-key="${escapeHtml(collapseKey)}" aria-expanded="${collapsed ? 'false' : 'true'}" title="${collapsed ? 'Expand entry' : 'Collapse entry'}">
+                    <i class="fa-solid fa-chevron-${collapsed ? 'right' : 'down'}"></i>
+                    <strong>${escapeHtml(title)}</strong>
+                </button>
                 <div class="dpm--entry-actions">
                     ${renderLockControls(entryPath, { compact: true })}
                     <button class="menu_button menu_button_icon" type="button" data-action="remove-entry" data-collection="${escapeHtml(collectionName)}" data-index="${index}" title="Remove entry">
@@ -770,7 +787,7 @@ function renderCollectionEntry(collectionName, entry, index) {
                     </button>
                 </div>
             </div>
-            <div class="dpm--entry-fields">
+            <div class="dpm--entry-fields" ${collapsed ? 'hidden' : ''}>
                 ${definitions.map(([field, label, type]) => renderEntryField(collectionName, index, entry, field, label, type)).join('')}
             </div>
         </article>
@@ -1140,6 +1157,7 @@ async function onPanelClick(event) {
         if (action === 'save-persona') savePersonaFromEditor();
         if (action === 'save-section-editor') savePersonaFromSectionEditor();
         if (action === 'toggle-section') toggleSection(button.dataset.section);
+        if (action === 'toggle-entry') toggleEntry(button.dataset.entryKey);
         if (action === 'add-entry') addCollectionEntry(button.dataset.collection);
         if (action === 'remove-entry') await removeCollectionEntry(button.dataset.collection, Number(button.dataset.index));
         if (action === 'toggle-lock-menu') {
@@ -1183,6 +1201,30 @@ function toggleSection(sectionName) {
     else collapsedSections.add(sectionName);
     storeCollapsedSections(collapsedSections);
     renderPanel();
+}
+
+function toggleEntry(entryKey) {
+    if (!entryKey) return;
+    const collapsed = !collapsedEntries.has(entryKey);
+    if (collapsed) collapsedEntries.add(entryKey);
+    else collapsedEntries.delete(entryKey);
+    storeCollapsedEntries(collapsedEntries);
+
+    const entry = [...document.querySelectorAll('#dpm--panel-body .dpm--entry')]
+        .find(item => item.dataset.entryKey === entryKey);
+    if (!entry) return;
+
+    entry.classList.toggle('dpm--entry-collapsed', collapsed);
+    const fields = entry.querySelector('.dpm--entry-fields');
+    if (fields) fields.hidden = collapsed;
+    const toggle = entry.querySelector('.dpm--entry-toggle');
+    toggle?.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    toggle?.setAttribute('title', collapsed ? 'Expand entry' : 'Collapse entry');
+    const icon = toggle?.querySelector('i');
+    if (icon) {
+        icon.classList.toggle('fa-chevron-right', collapsed);
+        icon.classList.toggle('fa-chevron-down', !collapsed);
+    }
 }
 
 async function confirmStreamlinedModeEnable(state) {

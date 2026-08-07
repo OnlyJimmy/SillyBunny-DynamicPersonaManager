@@ -172,6 +172,23 @@ export function storeCollapsedSections(collapsed) {
     }
 }
 
+export function readCollapsedEntries() {
+    try {
+        const parsed = JSON.parse(globalThis.localStorage?.getItem?.(LOCAL_STORAGE_KEYS.collapsedEntries) || '[]');
+        return new Set(Array.isArray(parsed) ? parsed : []);
+    } catch {
+        return new Set();
+    }
+}
+
+export function storeCollapsedEntries(collapsed) {
+    try {
+        globalThis.localStorage?.setItem?.(LOCAL_STORAGE_KEYS.collapsedEntries, JSON.stringify([...collapsed]));
+    } catch {
+        // Storage failure only affects panel display preferences.
+    }
+}
+
 export function listToText(value) {
     return (Array.isArray(value) ? value : []).join('\n');
 }

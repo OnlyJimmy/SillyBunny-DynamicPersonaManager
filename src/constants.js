@@ -17,6 +17,7 @@ export const LOCAL_STORAGE_KEYS = Object.freeze({
     panelWidth: 'dpm--panel-width',
     lastTab: 'dpm--panel-last-tab',
     collapsedSections: 'dpm--collapsed-sections',
+    collapsedEntries: 'dpm--collapsed-entries',
 });
 
 export const PANEL_EVENT = 'sillybunny:right-panel-opening';
