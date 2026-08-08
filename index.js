@@ -1138,6 +1138,8 @@ function renderSettingsTab(state) {
             ${analysisState.lastError ? `<p class="dpm--danger-text">${escapeHtml(analysisState.lastError)}</p>` : ''}
             ${warnings.length ? `<details><summary>Last validation warnings</summary><ul>${warnings.map(warning => `<li>${escapeHtml(warning.message || warning)}</li>`).join('')}</ul></details>` : ''}
             <div class="dpm--button-row">
+                <button class="dpm--action-button dpm--danger-action" type="button" data-action="cancel-dpm-actions"><i class="fa-solid fa-ban"></i><span>Cancel actions</span></button>
+                <button class="dpm--action-button" type="button" data-action="reanalyse-latest-pair"><i class="fa-solid fa-rotate"></i><span>Scan latest pair</span></button>
                 <button class="dpm--action-button dpm--danger-action" type="button" data-action="reset-chat">Reset DPM data for this chat</button>
             </div>
         </section>
@@ -1176,6 +1178,7 @@ async function onPanelClick(event) {
         if (action === 'reject-selected-operations') rejectSelectedOperations();
         if (action === 'reject-non-current-swipe-operations') rejectNonCurrentSwipeOperations();
         if (action === 'reject-all-operations') rejectAllPendingOperations();
+        if (action === 'cancel-dpm-actions') cancelAllDpmActions();
         if (action === 'reanalyse-latest-pair') reanalyseLatestPair();
         if (action === 'navigate-source') await navigateToSourceMessage(Number(button.dataset.messageId), button.dataset.swipeId === '' ? null : Number(button.dataset.swipeId));
         if (action === 'restore-checkpoint') await restoreCheckpoint(button.dataset.checkpointId);
@@ -1960,6 +1963,26 @@ function cancelActiveAnalysis() {
     analysisRunId += 1;
     analysisAbortController?.abort?.();
     analysisAbortController = null;
+}
+
+function cancelAllDpmActions() {
+    cancelActiveAnalysis();
+    if (scheduledAnalysisTimer !== null) {
+        clearTimeout(scheduledAnalysisTimer);
+        scheduledAnalysisTimer = null;
+    }
+    activeDpmOperationCount = 0;
+    refreshChatSendGuard();
+
+    const context = getContext();
+    const { state } = readChatState(context);
+    state.analysisState ??= {};
+    state.analysisState.status = state.analysisState.paused ? 'paused' : 'idle';
+    state.analysisState.lastError = '';
+    writeChatState(context, state, { immediate: true });
+    refreshHandleState(state);
+    if (panelOpen) renderPanel();
+    notify('DPM actions cancelled.');
 }
 
 function scheduleLatestPairAnalysis(delay = 150) {
