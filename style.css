@@ -248,6 +248,24 @@
     line-height: 1.35;
 }
 
+.dpm--custom-prompt-sections {
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 8px;
+    padding: 8px 10px 10px;
+    margin: 0 0 10px;
+}
+
+.dpm--custom-prompt-sections legend {
+    padding: 0 4px;
+    font-weight: 700;
+}
+
+.dpm--custom-prompt-sections > div {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px 10px;
+}
+
 .dpm--sticky-actions {
     position: sticky;
     top: 0;

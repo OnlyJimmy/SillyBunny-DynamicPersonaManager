@@ -101,6 +101,36 @@ test('minimal prompt mode omits lower priority sections', () => {
     assert.doesNotMatch(prompt, /Skills:/);
 });
 
+test('custom prompt mode only includes selected sections', () => {
+    const persona = createBlankPersona({ name: 'Ren' });
+    persona.skills.push({ id: 'skill_1', name: 'Map copying' });
+    persona.inventory.push({ id: 'item_1', name: 'Iron key', quantity: 1 });
+
+    const prompt = renderCompactPrompt(persona, {
+        mode: 'custom',
+        customSections: ['inventory'],
+    });
+
+    assert.match(prompt, /Inventory:/);
+    assert.match(prompt, /Iron key/);
+    assert.doesNotMatch(prompt, /Skills:/);
+    assert.doesNotMatch(prompt, /Map copying/);
+});
+
+test('custom prompt mode can disable every managed section', () => {
+    const persona = createBlankPersona({ name: 'Ren', summary: 'Brief summary.' });
+    persona.skills.push({ id: 'skill_1', name: 'Map copying' });
+
+    const prompt = renderCompactPrompt(persona, {
+        mode: 'custom',
+        customSections: [],
+    });
+
+    assert.doesNotMatch(prompt, /Identity:/);
+    assert.doesNotMatch(prompt, /Skills:/);
+    assert.match(prompt, /Summary:/);
+});
+
 test('prompt renderer trims to configured budget', () => {
     const persona = createBlankPersona({
         name: 'Ren',

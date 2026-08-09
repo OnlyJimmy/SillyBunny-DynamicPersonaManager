@@ -77,6 +77,7 @@ export const DEFAULT_GLOBAL_SETTINGS = Object.freeze({
     promptMode: PROMPT_MODES.compact,
     promptTokenBudget: 1200,
     promptSectionOrder: [],
+    customPromptSections: null,
     promptSortMode: 'sectionOrder',
     nativePersonaMode: 'hybrid',
     failurePauseThreshold: 3,

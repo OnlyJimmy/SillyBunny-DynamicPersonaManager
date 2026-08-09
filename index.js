@@ -86,9 +86,11 @@ const PROMPT_MODE_DESCRIPTIONS = Object.freeze({
     },
     [PROMPT_MODES.custom]: {
         label: 'Custom',
-        text: 'Uses the configured section order and sorting controls with the standard renderable section set. Best when you want manual control over which details appear earliest.',
+        text: 'Uses the custom section checklist, configured section order, and sorting controls. Best when you want manual control over which managed details are sent.',
     },
 });
+
+const PROMPT_SECTION_OPTIONS = Object.freeze(SECTION_ORDER.filter(section => section !== 'overview'));
 
 function shouldBlockChatSendDuringOperation() {
     return !!getSettings().blockChatSendDuringOperation && activeDpmOperationCount > 0;
@@ -228,13 +230,24 @@ function getPromptModeDescription(mode) {
     return PROMPT_MODE_DESCRIPTIONS[mode] || PROMPT_MODE_DESCRIPTIONS[PROMPT_MODES.compact];
 }
 
+function getCustomPromptSections(settings = getSettings()) {
+    const allowed = new Set(PROMPT_SECTION_OPTIONS);
+    return Array.isArray(settings.customPromptSections)
+        ? settings.customPromptSections.filter(section => allowed.has(section))
+        : [...PROMPT_SECTION_OPTIONS];
+}
+
 function getPromptRenderOptions(persona = null) {
     const settings = getSettings();
     const promptSettings = persona?.promptSettings ?? {};
+    const mode = promptSettings.mode || settings.promptMode;
     return {
-        mode: promptSettings.mode || settings.promptMode,
+        mode,
         maximumTokens: Number(promptSettings.maximumTokens || settings.promptTokenBudget || 0),
         sectionOrder: promptSettings.sectionOrder?.length ? promptSettings.sectionOrder : settings.promptSectionOrder,
+        customSections: mode === PROMPT_MODES.custom && Array.isArray(settings.customPromptSections)
+            ? getCustomPromptSections(settings)
+            : null,
         sortMode: settings.promptSortMode,
         customHeader: promptSettings.customHeader || '',
         customFooter: promptSettings.customFooter || '',
@@ -2605,6 +2618,8 @@ function injectSettingsPanel() {
     const profiles = getConnectionProfiles();
     const sectionOrderText = (Array.isArray(settings.promptSectionOrder) && settings.promptSectionOrder.length ? settings.promptSectionOrder : SECTION_ORDER).join('\n');
     const promptModeDescription = getPromptModeDescription(settings.promptMode);
+    const customPromptSections = new Set(getCustomPromptSections(settings));
+    const customPromptVisible = settings.promptMode === PROMPT_MODES.custom;
 
     parent.insertAdjacentHTML('beforeend', `
         <div id="dpm--settings-drawer" class="inline-drawer">
@@ -2631,6 +2646,17 @@ function injectSettingsPanel() {
                     </select>
                 </label>
                 <p id="dpm--prompt-mode-description" class="dpm--prompt-mode-description dpm--muted">${escapeHtml(promptModeDescription.text)}</p>
+                <fieldset id="dpm--custom-prompt-sections" class="dpm--custom-prompt-sections" ${customPromptVisible ? '' : 'hidden'}>
+                    <legend>Custom prompt sections</legend>
+                    <div>
+                        ${PROMPT_SECTION_OPTIONS.map(section => `
+                            <label class="checkbox_label">
+                                <input class="dpm--custom-prompt-section" type="checkbox" value="${escapeHtml(section)}" ${customPromptSections.has(section) ? 'checked' : ''}>
+                                ${escapeHtml(SECTION_LABELS[section] || section)}
+                            </label>
+                        `).join('')}
+                    </div>
+                </fieldset>
                 <label>Prompt token budget <input id="dpm--global-budget" class="text_pole" type="number" min="100" max="8000" step="50" value="${Number(settings.promptTokenBudget)}"></label>
                 <label>Prompt sorting
                     <select id="dpm--prompt-sort" class="text_pole">
@@ -2677,6 +2703,18 @@ function injectSettingsPanel() {
         getSettings().promptMode = String(event.target.value || PROMPT_MODES.compact);
         const description = parent.querySelector('#dpm--prompt-mode-description');
         if (description) description.textContent = getPromptModeDescription(getSettings().promptMode).text;
+        const customSectionList = parent.querySelector('#dpm--custom-prompt-sections');
+        if (customSectionList) customSectionList.hidden = getSettings().promptMode !== PROMPT_MODES.custom;
+        saveSettingsDebounced();
+        refreshPromptInjection();
+        if (panelOpen) renderPanel();
+    });
+    parent.querySelector('#dpm--custom-prompt-sections')?.addEventListener('change', event => {
+        if (!event.target.classList?.contains('dpm--custom-prompt-section')) return;
+        const selected = [...parent.querySelectorAll('.dpm--custom-prompt-section:checked')]
+            .map(input => input.value)
+            .filter(section => PROMPT_SECTION_OPTIONS.includes(section));
+        getSettings().customPromptSections = selected;
         saveSettingsDebounced();
         refreshPromptInjection();
         if (panelOpen) renderPanel();

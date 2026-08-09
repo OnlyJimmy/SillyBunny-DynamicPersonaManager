@@ -337,13 +337,17 @@ const SECTION_RENDERERS = Object.freeze({
     },
 });
 
-function getModeSections(mode) {
+function getModeSections(mode, customSections = null) {
     if (mode === PROMPT_MODES.minimal) return ['identity', 'conditions', 'inventory', 'quests'];
+    if (mode === PROMPT_MODES.custom && Array.isArray(customSections)) {
+        const allowed = new Set(SECTION_ORDER.filter(section => section !== 'overview'));
+        return customSections.filter(section => allowed.has(section));
+    }
     return [...SECTION_ORDER].filter(section => section !== 'overview');
 }
 
-function getOrderedSections(mode, sectionOrder = [], sortMode = 'sectionOrder') {
-    const allowed = new Set(getModeSections(mode));
+function getOrderedSections(mode, sectionOrder = [], sortMode = 'sectionOrder', customSections = null) {
+    const allowed = new Set(getModeSections(mode, customSections));
     const order = (Array.isArray(sectionOrder) && sectionOrder.length ? sectionOrder : SECTION_ORDER)
         .filter(section => allowed.has(section) && SECTION_RENDERERS[section]);
     const missing = [...allowed].filter(section => !order.includes(section) && SECTION_RENDERERS[section]);
@@ -373,6 +377,7 @@ export function renderCompactPrompt(persona, {
     mode = PROMPT_MODES.compact,
     maximumTokens = 0,
     sectionOrder = [],
+    customSections = null,
     sortMode = 'sectionOrder',
     customHeader = '',
     customFooter = '',
@@ -383,7 +388,7 @@ export function renderCompactPrompt(persona, {
     const lines = ['[Managed Player Character State]', ''];
     if (customHeader) lines.push(cleanText(customHeader), '');
 
-    for (const section of getOrderedSections(promptMode, sectionOrder, sortMode)) {
+    for (const section of getOrderedSections(promptMode, sectionOrder, sortMode, customSections)) {
         if (!canRender(persona, `/${section}`, hiddenMode)) continue;
         const renderer = SECTION_RENDERERS[section];
         addSection(lines, renderer.heading, renderer.render(persona, hiddenMode));
