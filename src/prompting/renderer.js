@@ -39,7 +39,7 @@ function addSection(lines, heading, sectionLines) {
     lines.push(`${heading}:`, ...cleanLines, '');
 }
 
-function estimateTokens(text) {
+export function estimateTokens(text) {
     return Math.ceil(String(text || '').length / 4);
 }
 

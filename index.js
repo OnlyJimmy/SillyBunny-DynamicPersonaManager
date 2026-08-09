@@ -19,7 +19,7 @@ import { createPersonaDiffOperations } from './src/operations/diff.js';
 import { createInverseOperations } from './src/operations/inverse.js';
 import { normalizeOperation } from './src/operations/normalize.js';
 import { createProposal, proposalHasPendingOperations } from './src/operations/proposals.js';
-import { renderCompactPrompt } from './src/prompting/renderer.js';
+import { estimateTokens, renderCompactPrompt } from './src/prompting/renderer.js';
 import { createBlankPersona, createDefaultGlobalSettings } from './src/state/defaults.js';
 import { ensureChatState, readChatState, resetChatState, writeChatState } from './src/state/repository.js';
 import { createCheckpoint, createRevision, findNearestCheckpointForAnchor, findPreviousCheckpointBeforeAnchor } from './src/state/revisions.js';
@@ -243,7 +243,7 @@ function getPromptRenderOptions(persona = null) {
     const mode = promptSettings.mode || settings.promptMode;
     return {
         mode,
-        maximumTokens: Number(promptSettings.maximumTokens || settings.promptTokenBudget || 0),
+        maximumTokens: Number(settings.promptTokenBudget || promptSettings.maximumTokens || 0),
         sectionOrder: promptSettings.sectionOrder?.length ? promptSettings.sectionOrder : settings.promptSectionOrder,
         customSections: mode === PROMPT_MODES.custom && Array.isArray(settings.customPromptSections)
             ? getCustomPromptSections(settings)
@@ -1152,12 +1152,26 @@ function renderSourceAnchor(anchor) {
 }
 
 function renderPromptTab(state) {
-    const prompt = state.enabled && state.persona ? renderCompactPrompt(state.persona, getPromptRenderOptions(state.persona)) : '';
+    const renderOptions = state.persona ? getPromptRenderOptions(state.persona) : {};
+    const prompt = state.enabled && state.persona ? renderCompactPrompt(state.persona, renderOptions) : '';
+    const untrimmedPrompt = state.enabled && state.persona
+        ? renderCompactPrompt(state.persona, { ...renderOptions, maximumTokens: 0 })
+        : '';
+    const renderedTokens = estimateTokens(prompt);
+    const untrimmedTokens = estimateTokens(untrimmedPrompt);
+    const budget = Number(renderOptions.maximumTokens || 0);
+    const trimmed = !!prompt && !!untrimmedPrompt && prompt !== untrimmedPrompt;
     return `
         <section class="dpm--section">
             <div class="dpm--section-header">
                 <h3>Prompt Preview</h3>
                 <span class="dpm--muted">${prompt ? 'Canonical state only' : 'No prompt injected'}</span>
+            </div>
+            <div class="dpm--prompt-stats ${trimmed ? 'dpm--prompt-trimmed' : ''}">
+                <span><i class="fa-solid fa-gauge-high"></i> Estimated prompt usage: ${escapeHtml(renderedTokens)} token${renderedTokens === 1 ? '' : 's'}</span>
+                <span>Budget: ${budget ? `${escapeHtml(budget)} token${budget === 1 ? '' : 's'}` : 'Unlimited'}</span>
+                ${untrimmedPrompt ? `<span>Full estimate before trimming: ${escapeHtml(untrimmedTokens)} token${untrimmedTokens === 1 ? '' : 's'}</span>` : ''}
+                ${trimmed ? '<strong><i class="fa-solid fa-scissors"></i> Trimmed to fit the configured budget.</strong>' : ''}
             </div>
             <textarea class="text_pole dpm--prompt-preview" readonly>${escapeHtml(prompt)}</textarea>
         </section>

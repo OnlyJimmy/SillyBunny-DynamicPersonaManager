@@ -778,6 +778,26 @@
     resize: vertical;
 }
 
+.dpm--prompt-stats {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin-bottom: 10px;
+    background: rgba(0, 0, 0, 0.08);
+}
+
+.dpm--prompt-stats strong {
+    color: var(--warning);
+}
+
+.dpm--prompt-trimmed {
+    border-color: var(--warning);
+}
+
 .dpm--history-entry {
     display: grid;
     gap: 6px;

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createBlankPersona } from '../src/state/defaults.js';
-import { renderCompactPrompt } from '../src/prompting/renderer.js';
+import { estimateTokens, renderCompactPrompt } from '../src/prompting/renderer.js';
 
 test('compact prompt omits empty sections and includes canonical fields', () => {
     const persona = createBlankPersona({
@@ -143,4 +143,9 @@ test('prompt renderer trims to configured budget', () => {
     assert.match(prompt, /Managed Player Character State/);
     assert.match(prompt, /Managed Player Character State\]/);
     assert.ok(prompt.length < 260);
+});
+
+test('prompt token estimator uses the renderer approximation', () => {
+    assert.equal(estimateTokens('12345678'), 2);
+    assert.equal(estimateTokens(''), 0);
 });
