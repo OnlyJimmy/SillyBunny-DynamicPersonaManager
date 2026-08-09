@@ -243,6 +243,11 @@
     filter: grayscale(0.2);
 }
 
+.dpm--prompt-mode-description {
+    margin: -4px 0 10px;
+    line-height: 1.35;
+}
+
 .dpm--sticky-actions {
     position: sticky;
     top: 0;

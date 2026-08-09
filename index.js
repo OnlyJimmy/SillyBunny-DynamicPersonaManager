@@ -67,6 +67,29 @@ const LOCK_MODE_LABELS = Object.freeze({
     [LOCK_MODES.immutable]: 'Immutable',
 });
 
+const PROMPT_MODE_DESCRIPTIONS = Object.freeze({
+    [PROMPT_MODES.full]: {
+        label: 'Full',
+        text: 'Includes every renderable managed section except Overview: identity, appearance, personality, attributes, skills, inventory, equipment, conditions, relationships, quests, goals, knowledge, currencies, custom sections, plus summary. Best when context budget is generous.',
+    },
+    [PROMPT_MODES.compact]: {
+        label: 'Compact',
+        text: 'Uses the standard canonical section set in concise bullet form, omitting empty sections and prompt-hidden locks. This is the balanced default for regular roleplay.',
+    },
+    [PROMPT_MODES.minimal]: {
+        label: 'Minimal',
+        text: 'Includes only identity, active conditions, inventory, quests, and summary. Best when the chat needs a very small persona state footprint.',
+    },
+    [PROMPT_MODES.adaptive]: {
+        label: 'Adaptive',
+        text: 'Uses the standard section set, then respects the configured token budget by trimming lower-priority details when needed. Best for changing context limits.',
+    },
+    [PROMPT_MODES.custom]: {
+        label: 'Custom',
+        text: 'Uses the configured section order and sorting controls with the standard renderable section set. Best when you want manual control over which details appear earliest.',
+    },
+});
+
 function shouldBlockChatSendDuringOperation() {
     return !!getSettings().blockChatSendDuringOperation && activeDpmOperationCount > 0;
 }
@@ -199,6 +222,10 @@ function getPromptRole(value) {
         case 'system':
         default: return extension_prompt_roles.SYSTEM;
     }
+}
+
+function getPromptModeDescription(mode) {
+    return PROMPT_MODE_DESCRIPTIONS[mode] || PROMPT_MODE_DESCRIPTIONS[PROMPT_MODES.compact];
 }
 
 function getPromptRenderOptions(persona = null) {
@@ -2577,6 +2604,7 @@ function injectSettingsPanel() {
     const settings = getSettings();
     const profiles = getConnectionProfiles();
     const sectionOrderText = (Array.isArray(settings.promptSectionOrder) && settings.promptSectionOrder.length ? settings.promptSectionOrder : SECTION_ORDER).join('\n');
+    const promptModeDescription = getPromptModeDescription(settings.promptMode);
 
     parent.insertAdjacentHTML('beforeend', `
         <div id="dpm--settings-drawer" class="inline-drawer">
@@ -2599,9 +2627,10 @@ function injectSettingsPanel() {
                 <label>Native conversion output tokens <input id="dpm--native-output-tokens" class="text_pole" type="number" min="500" max="12000" step="100" value="${Number(settings.nativeConversionTokenAllowance)}"></label>
                 <label>Prompt mode
                     <select id="dpm--prompt-mode" class="text_pole">
-                        ${Object.values(PROMPT_MODES).map(mode => `<option value="${escapeHtml(mode)}" ${settings.promptMode === mode ? 'selected' : ''}>${escapeHtml(mode)}</option>`).join('')}
+                        ${Object.values(PROMPT_MODES).map(mode => `<option value="${escapeHtml(mode)}" ${settings.promptMode === mode ? 'selected' : ''}>${escapeHtml(getPromptModeDescription(mode).label)}</option>`).join('')}
                     </select>
                 </label>
+                <p id="dpm--prompt-mode-description" class="dpm--prompt-mode-description dpm--muted">${escapeHtml(promptModeDescription.text)}</p>
                 <label>Prompt token budget <input id="dpm--global-budget" class="text_pole" type="number" min="100" max="8000" step="50" value="${Number(settings.promptTokenBudget)}"></label>
                 <label>Prompt sorting
                     <select id="dpm--prompt-sort" class="text_pole">
@@ -2646,6 +2675,8 @@ function injectSettingsPanel() {
     });
     parent.querySelector('#dpm--prompt-mode')?.addEventListener('change', event => {
         getSettings().promptMode = String(event.target.value || PROMPT_MODES.compact);
+        const description = parent.querySelector('#dpm--prompt-mode-description');
+        if (description) description.textContent = getPromptModeDescription(getSettings().promptMode).text;
         saveSettingsDebounced();
         refreshPromptInjection();
         if (panelOpen) renderPanel();
