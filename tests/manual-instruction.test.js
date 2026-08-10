@@ -6,14 +6,20 @@ import { LOCK_MODES } from '../src/state/locks.js';
 
 test('manual instruction prompt includes instruction and current persona', () => {
     const persona = createBlankPersona({ name: 'Ren' });
+    persona.inventory.push({ id: 'item_1', name: 'Torch', quantity: 3 });
+    persona.relationships.push({ id: 'rel_1', entityName: 'Mary', trust: 25 });
     const prompt = buildManualInstructionPrompt({
         persona,
-        instruction: 'Add two gold pieces',
+        instruction: 'Use one torch',
     });
 
     assert.match(prompt, /manual editor/);
     assert.match(prompt, /Name: Ren/);
-    assert.match(prompt, /Add two gold pieces/);
+    assert.match(prompt, /Use one torch/);
+    assert.match(prompt, /Exact JSON snapshot/);
+    assert.match(prompt, /"name": "Torch"/);
+    assert.match(prompt, /\/inventory\/2\/quantity/);
+    assert.match(prompt, /\/relationships\/1\/trust/);
 });
 
 test('manual instruction analysis accepts operations without chat evidence', async () => {
@@ -61,4 +67,31 @@ test('manual instruction analysis still respects proposal locks', async () => {
 
     assert.equal(result.proposal, null);
     assert.equal(result.lockedSkippedCount, 1);
+});
+
+test('manual instruction analysis accepts existing quantity reductions', async () => {
+    const persona = createBlankPersona({ name: 'Ren' });
+    persona.inventory.push({ id: 'item_1', name: 'Torch', quantity: 3 });
+
+    const result = await analyseManualInstruction({
+        context: {},
+        persona,
+        instruction: 'Use one torch',
+        generateRaw: async () => JSON.stringify({
+            proposalVersion: 1,
+            summary: 'Use one torch',
+            operations: [{
+                type: 'set',
+                path: '/inventory/0/quantity',
+                oldValue: 3,
+                value: 2,
+                confidence: 1,
+            }],
+        }),
+    });
+
+    assert.equal(result.proposal.operations.length, 1);
+    assert.equal(result.proposal.operations[0].type, 'set');
+    assert.equal(result.proposal.operations[0].path, '/inventory/0/quantity');
+    assert.equal(result.proposal.operations[0].value, 2);
 });
