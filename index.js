@@ -8,6 +8,7 @@ import { user_avatar } from '../../../personas.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 import { DEFAULT_GLOBAL_SETTINGS, DISPLAY_NAME, LOCAL_STORAGE_KEYS, MODULE_NAME, PANEL_EVENT, PANEL_ID, PROMPT_MODES, SECTION_ORDER } from './src/constants.js';
 import { analysePair } from './src/analysis/analyser.js';
+import { analyseManualInstruction } from './src/analysis/manual-instruction.js';
 import { findLatestCompletedPair, fingerprintPair, hasAnalysedFingerprint, rememberAnalysedFingerprint } from './src/analysis/fingerprints.js';
 import { annotateProposalStaleness, getProposalSourceState } from './src/analysis/staleness.js';
 import { buildFullBackupExport, buildNativePersonaTextExport, buildPersonaExport, buildPlainTextPersonaExport, buildPromptTextExport } from './src/import-export/exporter.js';
@@ -1173,6 +1174,14 @@ function renderPromptTab(state) {
                 ${untrimmedPrompt ? `<span>Full estimate before trimming: ${escapeHtml(untrimmedTokens)} token${untrimmedTokens === 1 ? '' : 's'}</span>` : ''}
                 ${trimmed ? '<strong><i class="fa-solid fa-scissors"></i> Trimmed to fit the configured budget.</strong>' : ''}
             </div>
+            <div class="dpm--manual-instruction">
+                <label>Request persona changes
+                    <textarea id="dpm--manual-instruction" class="text_pole" rows="3" placeholder="Add two gold pieces&#10;Add basic ritual magic as a skill&#10;Double the trust with Mary"></textarea>
+                </label>
+                <div class="dpm--button-row">
+                    <button class="dpm--action-button dpm--primary-action" type="button" data-action="analyse-manual-instruction" ${state.enabled && state.persona ? '' : 'disabled'}><i class="fa-solid fa-wand-magic-sparkles"></i><span>Create pending changes</span></button>
+                </div>
+            </div>
             <textarea class="text_pole dpm--prompt-preview" readonly>${escapeHtml(prompt)}</textarea>
         </section>
     `;
@@ -1234,6 +1243,7 @@ async function onPanelClick(event) {
         if (action === 'reject-all-operations') rejectAllPendingOperations();
         if (action === 'cancel-dpm-actions') cancelAllDpmActions();
         if (action === 'reanalyse-latest-pair') reanalyseLatestPair();
+        if (action === 'analyse-manual-instruction') await analyseManualInstructionFromPromptTab();
         if (action === 'navigate-source') await navigateToSourceMessage(Number(button.dataset.messageId), button.dataset.swipeId === '' ? null : Number(button.dataset.swipeId));
         if (action === 'restore-checkpoint') await restoreCheckpoint(button.dataset.checkpointId);
         if (action === 'revert-revision') await revertRevision(button.dataset.revisionId);
@@ -1831,6 +1841,47 @@ function rejectAllPendingOperations() {
     writeChatState(context, state, { immediate: true });
     renderPanel();
     notify(`Rejected ${rejected} pending operation${rejected === 1 ? '' : 's'}.`);
+}
+
+async function analyseManualInstructionFromPromptTab() {
+    const input = document.getElementById('dpm--manual-instruction');
+    const instruction = String(input?.value || '').trim();
+    if (!instruction) throw new Error('Enter a persona change request first.');
+
+    const context = getContext();
+    const settings = getSettings();
+    const { state } = readChatState(context);
+    if (!state.enabled || !state.persona) {
+        throw new Error('Enable DPM and create a managed persona before requesting changes.');
+    }
+
+    const result = await analyseManualInstruction({
+        context,
+        persona: state.persona,
+        instruction,
+        settings,
+        generateRaw: generateDpmRaw,
+    });
+
+    if (!result.proposal) {
+        state.analysisState ??= {};
+        state.analysisState.lastWarnings = result.warnings || [];
+        writeChatState(context, state, { immediate: true });
+        renderPanel();
+        notify('No safe pending changes were generated from that request.', result.warnings?.length ? 'warning' : 'info');
+        return;
+    }
+
+    state.pendingProposals.push(result.proposal);
+    state.analysisState ??= {};
+    state.analysisState.lastWarnings = result.warnings || [];
+    writeChatState(context, state, { immediate: true });
+    if (input) input.value = '';
+    activeTab = 'pending';
+    setLocalValue(LOCAL_STORAGE_KEYS.lastTab, activeTab);
+    refreshPromptInjection();
+    renderPanel();
+    notify(`Created ${result.proposal.operations.length} pending manual change${result.proposal.operations.length === 1 ? '' : 's'}.`);
 }
 
 function reanalyseLatestPair() {

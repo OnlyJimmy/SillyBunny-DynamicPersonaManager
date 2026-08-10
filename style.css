@@ -798,6 +798,23 @@
     border-color: var(--warning);
 }
 
+.dpm--manual-instruction {
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 8px;
+    padding: 10px;
+    margin-bottom: 10px;
+    background: rgba(0, 0, 0, 0.08);
+}
+
+.dpm--manual-instruction label {
+    margin-bottom: 8px;
+}
+
+.dpm--manual-instruction textarea {
+    min-height: 82px;
+    resize: vertical;
+}
+
 .dpm--history-entry {
     display: grid;
     gap: 6px;

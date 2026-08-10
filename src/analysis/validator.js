@@ -35,7 +35,7 @@ function annotateOperationSource(operation, pair) {
     return operation;
 }
 
-export function buildValidatedProposal({ persona, parsedResponse, source, analysis = {}, minimumConfidence = 0.7, pair = null, evidenceMaximumLength = 200 }) {
+export function buildValidatedProposal({ persona, parsedResponse, source, analysis = {}, minimumConfidence = 0.7, pair = null, evidenceMaximumLength = 200, requireEvidence = true }) {
     const validOperations = [];
     const warnings = [];
 
@@ -46,9 +46,11 @@ export function buildValidatedProposal({ persona, parsedResponse, source, analys
             if (operation.confidence !== null && operation.confidence < minimumConfidence) {
                 throw new Error(`Confidence ${operation.confidence} is below threshold ${minimumConfidence}.`);
             }
-            const evidenceResult = validateOperationEvidence(operation, pair, { maximumLength: evidenceMaximumLength });
-            if (!evidenceResult.ok) {
-                throw new Error(evidenceResult.message);
+            if (requireEvidence) {
+                const evidenceResult = validateOperationEvidence(operation, pair, { maximumLength: evidenceMaximumLength });
+                if (!evidenceResult.ok) {
+                    throw new Error(evidenceResult.message);
+                }
             }
             annotateOperationSource(operation, pair);
             simulateOperations(persona, [operation]);

@@ -17,7 +17,7 @@ If there are no safe persona changes, return the same object with an empty opera
 Previous error: ${error.message}`;
 }
 
-async function generateParsedAnalysis({ generate, prompt, responseLength, signal, retryLimit }) {
+export async function generateParsedAnalysis({ generate, prompt, responseLength, signal, retryLimit }) {
     const warnings = [];
     let lastError = null;
 
