@@ -321,20 +321,20 @@
 
 .dpm--character-section-tabs {
     display: flex;
-    gap: 4px;
     overflow-x: auto;
     margin: 0 -12px 12px;
-    padding: 8px 12px 10px;
+    padding: 0;
+    border-top: 1px solid var(--SmartThemeBorderColor);
     border-bottom: 1px solid var(--SmartThemeBorderColor);
     scrollbar-width: thin;
 }
 
 .dpm--character-section-tabs button {
     flex: 0 0 auto;
-    border: 1px solid var(--SmartThemeBorderColor);
-    border-radius: 6px;
-    padding: 7px 10px;
-    background: rgba(0, 0, 0, 0.08);
+    border: 0;
+    border-right: 1px solid var(--SmartThemeBorderColor);
+    padding: 10px 12px;
+    background: transparent;
     color: inherit;
     cursor: pointer;
     white-space: nowrap;
@@ -342,7 +342,6 @@
 
 .dpm--character-section-tabs button.active {
     background: var(--SmartThemeQuoteColor);
-    color: var(--SmartThemeBodyColor);
 }
 
 .dpm--section,
