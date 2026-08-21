@@ -96,6 +96,9 @@ export function normalizeOperation(operation) {
         sourceMessageId: normalizeTextField(operation.sourceMessageId),
         sourceSwipeId: Number.isInteger(operation.sourceSwipeId) ? operation.sourceSwipeId : null,
         validationWarnings: normalizeStringArray(operation.validationWarnings),
+        duplicateRelationship: operation.duplicateRelationship && typeof operation.duplicateRelationship === 'object' && !Array.isArray(operation.duplicateRelationship)
+            ? { ...operation.duplicateRelationship }
+            : null,
         tags: normalizeStringArray(operation.tags),
         transactionId: normalizeTextField(operation.transactionId),
         transactionLabel: normalizeTextField(operation.transactionLabel),

@@ -666,6 +666,18 @@
     background: rgba(255, 180, 0, 0.12);
 }
 
+.dpm--relationship-duplicate {
+    border: 1px solid rgba(255, 180, 0, 0.55);
+    border-radius: 8px;
+    padding: 8px;
+    margin: 4px 0 8px;
+    background: rgba(255, 180, 0, 0.12);
+}
+
+.dpm--relationship-duplicate p {
+    margin: 0 0 8px;
+}
+
 .dpm--validation-warnings {
     margin: 4px 0 8px;
     color: var(--SmartThemeQuoteColor);

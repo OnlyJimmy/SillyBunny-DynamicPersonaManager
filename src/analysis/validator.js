@@ -10,6 +10,50 @@ function normalizeEvidenceText(value) {
         .toLowerCase();
 }
 
+function normalizeRelationshipName(value) {
+    return String(value ?? '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+}
+
+function getRelationshipAddName(operation) {
+    return normalizeRelationshipName(
+        operation?.value?.entityName
+        || operation?.value?.name
+        || operation?.value?.characterName
+        || operation?.value?.personName
+        || operation?.value?.person
+        || operation?.value?.entity
+        || operation?.targetLabel,
+    );
+}
+
+function annotateDuplicateRelationshipAdd(persona, operation) {
+    if (operation?.type !== 'add' || operation.path !== '/relationships') return operation;
+    const proposedName = getRelationshipAddName(operation);
+    if (!proposedName) return operation;
+
+    const relationships = Array.isArray(persona?.relationships) ? persona.relationships : [];
+    const existingIndex = relationships.findIndex(relationship => normalizeRelationshipName(relationship?.entityName) === proposedName);
+    if (existingIndex < 0) return operation;
+
+    const existing = relationships[existingIndex];
+    const displayName = existing?.entityName || operation?.value?.entityName || operation?.targetLabel || proposedName;
+    operation.duplicateRelationship = {
+        status: 'needsReview',
+        existingIndex,
+        existingPath: `/relationships/${existingIndex}`,
+        existingName: displayName,
+        proposedName: operation?.value?.entityName || operation?.targetLabel || displayName,
+    };
+    operation.validationWarnings = [
+        ...(Array.isArray(operation.validationWarnings) ? operation.validationWarnings : []),
+        `Relationship "${displayName}" already exists. Choose whether to update the existing entry, discard this duplicate, or keep both.`,
+    ];
+    return operation;
+}
+
 function annotateOperationSource(operation, pair) {
     if (!pair) return operation;
     const evidence = normalizeEvidenceText(operation.evidence);
@@ -52,6 +96,7 @@ export function buildValidatedProposal({ persona, parsedResponse, source, analys
                     throw new Error(evidenceResult.message);
                 }
             }
+            annotateDuplicateRelationshipAdd(persona, operation);
             annotateOperationSource(operation, pair);
             simulateOperations(persona, [operation]);
             validOperations.push(operation);

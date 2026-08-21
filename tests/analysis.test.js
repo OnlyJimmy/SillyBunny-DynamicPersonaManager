@@ -118,6 +118,31 @@ test('validated proposal counts lock-skipped operations', () => {
     assert.equal(result.warnings[0].code, 'lockedOperationSkipped');
 });
 
+test('validated proposal marks relationship adds that duplicate existing entries', () => {
+    const persona = createBlankPersona({ name: 'Ren' });
+    persona.relationships.push({ id: 'rel_1', entityName: 'Mary', summary: 'Trusted ally.' });
+    const result = buildValidatedProposal({
+        persona,
+        parsedResponse: {
+            proposalVersion: 1,
+            summary: 'Relationship update',
+            operations: [
+                { type: 'add', path: '/relationships', value: { entityName: 'Mary', summary: 'More trusting.' }, evidence: 'Mary seems closer.', confidence: 0.9 },
+            ],
+        },
+        source: { fingerprint: 'dpm_test' },
+        pair: {
+            userText: 'Mary seems closer.',
+            assistantText: 'Mary seems closer.',
+        },
+    });
+
+    const operation = result.proposal.operations[0];
+    assert.equal(operation.duplicateRelationship.status, 'needsReview');
+    assert.equal(operation.duplicateRelationship.existingIndex, 0);
+    assert.match(operation.validationWarnings[0], /already exists/);
+});
+
 test('evidence validation requires exact source excerpt', () => {
     const pair = {
         userText: 'I pick up the iron key.',

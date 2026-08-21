@@ -18,7 +18,7 @@ import { simulateOperations } from './src/operations/apply.js';
 import { annotateOperationConflicts, operationHasConflicts } from './src/operations/conflicts.js';
 import { createPersonaDiffOperations } from './src/operations/diff.js';
 import { createInverseOperations } from './src/operations/inverse.js';
-import { normalizeOperation } from './src/operations/normalize.js';
+import { normalizeAddValue, normalizeOperation } from './src/operations/normalize.js';
 import { createProposal, proposalHasPendingOperations } from './src/operations/proposals.js';
 import { estimateTokens, renderCompactPrompt } from './src/prompting/renderer.js';
 import { createBlankPersona, createDefaultGlobalSettings } from './src/state/defaults.js';
@@ -982,7 +982,8 @@ function renderPendingProposal(proposal) {
 function renderPendingOperation(proposal, operation) {
     const conflictCount = operation.conflicts?.length || 0;
     const hasConflicts = operationHasConflicts(operation);
-    const isBlocked = proposal.stale || hasConflicts;
+    const duplicateReview = operationNeedsDuplicateRelationshipReview(operation);
+    const isBlocked = proposal.stale || hasConflicts || duplicateReview;
     const transactionLabel = operation.transactionLabel || operation.transactionId;
     const sourceAnchor = getOperationSourceAnchor(proposal, operation);
     const title = operation.targetLabel || operation.path;
@@ -1003,6 +1004,7 @@ function renderPendingOperation(proposal, operation) {
             ${metadata.length ? `<div class="dpm--metadata-row">${metadata.map(item => `<span>${escapeHtml(item)}</span>`).join('')}</div>` : ''}
             ${transactionLabel ? `<p class="dpm--transaction-note"><i class="fa-solid fa-layer-group"></i> Transaction: ${escapeHtml(transactionLabel)}</p>` : ''}
             ${conflictCount ? `<p class="dpm--conflict-warning"><i class="fa-solid fa-triangle-exclamation"></i> Conflict detected with ${escapeHtml(conflictCount)} pending operation${conflictCount === 1 ? '' : 's'}.</p>` : ''}
+            ${duplicateReview ? renderDuplicateRelationshipReview(proposal, operation) : ''}
             ${operation.validationWarnings?.length ? `<ul class="dpm--validation-warnings">${operation.validationWarnings.map(warning => `<li>${escapeHtml(warning)}</li>`).join('')}</ul>` : ''}
             ${operation.reason ? `<p>${escapeHtml(operation.reason)}</p>` : ''}
             ${operation.evidence ? `<blockquote>${escapeHtml(operation.evidence)}</blockquote>` : ''}
@@ -1015,6 +1017,26 @@ function renderPendingOperation(proposal, operation) {
                 <button class="dpm--action-button dpm--danger-action" type="button" data-action="reject-operation" data-proposal-id="${escapeHtml(proposal.proposalId)}" data-operation-id="${escapeHtml(operation.operationId)}"><i class="fa-solid fa-xmark"></i><span>Reject</span></button>
             </div>
         </section>
+    `;
+}
+
+function operationNeedsDuplicateRelationshipReview(operation) {
+    return operation?.duplicateRelationship?.status === 'needsReview'
+        && operation.duplicateRelationship?.decision !== 'keepBoth';
+}
+
+function renderDuplicateRelationshipReview(proposal, operation) {
+    const duplicate = operation.duplicateRelationship || {};
+    const name = duplicate.existingName || duplicate.proposedName || operation.targetLabel || 'this relationship';
+    return `
+        <div class="dpm--relationship-duplicate">
+            <p><i class="fa-solid fa-user-group"></i> Relationship "${escapeHtml(name)}" already exists.</p>
+            <div class="dpm--button-row">
+                <button class="dpm--action-button dpm--primary-action" type="button" data-action="update-duplicate-relationship" data-proposal-id="${escapeHtml(proposal.proposalId)}" data-operation-id="${escapeHtml(operation.operationId)}"><i class="fa-solid fa-pen-to-square"></i><span>Update existing</span></button>
+                <button class="dpm--action-button" type="button" data-action="keep-duplicate-relationship" data-proposal-id="${escapeHtml(proposal.proposalId)}" data-operation-id="${escapeHtml(operation.operationId)}"><i class="fa-solid fa-copy"></i><span>Keep both</span></button>
+                <button class="dpm--action-button dpm--danger-action" type="button" data-action="reject-operation" data-proposal-id="${escapeHtml(proposal.proposalId)}" data-operation-id="${escapeHtml(operation.operationId)}"><i class="fa-solid fa-xmark"></i><span>Discard new</span></button>
+            </div>
+        </div>
     `;
 }
 
@@ -1236,6 +1258,8 @@ async function onPanelClick(event) {
         if (action === 'accept-operation') acceptPendingOperation(button.dataset.proposalId, button.dataset.operationId);
         if (action === 'force-accept-operation') await forceAcceptPendingOperation(button.dataset.proposalId, button.dataset.operationId);
         if (action === 'edit-operation') await editPendingOperation(button.dataset.proposalId, button.dataset.operationId);
+        if (action === 'update-duplicate-relationship') updateDuplicateRelationshipOperation(button.dataset.proposalId, button.dataset.operationId);
+        if (action === 'keep-duplicate-relationship') keepDuplicateRelationshipOperation(button.dataset.proposalId, button.dataset.operationId);
         if (action === 'reject-operation') rejectPendingOperation(button.dataset.proposalId, button.dataset.operationId);
         if (action === 'accept-selected-operations') acceptSelectedOperations();
         if (action === 'reject-selected-operations') rejectSelectedOperations();
@@ -1610,6 +1634,10 @@ function commitProposalOperations(context, state, proposal, operations, { ignore
     annotateOperationConflicts(getConflictScope(state, proposal));
     const pendingOperations = operations.filter(operation => operation.status !== 'accepted' && operation.status !== 'rejected');
     if (!pendingOperations.length) return 0;
+    const duplicateReview = pendingOperations.find(operationNeedsDuplicateRelationshipReview);
+    if (duplicateReview) {
+        throw new Error(`Relationship "${duplicateReview.duplicateRelationship?.existingName || duplicateReview.targetLabel || 'existing entry'}" already exists. Choose update existing, discard new, or keep both first.`);
+    }
     if (!ignoreConflicts) {
         const conflicted = pendingOperations.find(operationHasConflicts);
         if (conflicted) {
@@ -1774,6 +1802,97 @@ async function editPendingOperation(proposalId, operationId) {
     writeChatState(context, state, { immediate: true });
     renderPanel();
     notify('Pending operation updated.');
+}
+
+function hasMeaningfulRelationshipValue(value) {
+    if (value === null || value === undefined || value === '') return false;
+    if (Array.isArray(value)) return value.length > 0;
+    return true;
+}
+
+function mergeRelationshipDuplicate(existing, proposedValue) {
+    const normalized = normalizeAddValue('/relationships', proposedValue);
+    const incoming = proposedValue && typeof proposedValue === 'object' && !Array.isArray(proposedValue) ? proposedValue : {};
+    const merged = cloneJson(existing);
+    const fieldAliases = {
+        entityName: ['entityName', 'name', 'characterName', 'personName', 'person', 'entity', 'target', 'targetName'],
+        entityType: ['entityType'],
+        summary: ['summary', 'relationship', 'relationshipType', 'description', 'details'],
+        attitude: ['attitude', 'disposition', 'feeling', 'feelings'],
+        trust: ['trust'],
+        affection: ['affection'],
+        respect: ['respect'],
+        fear: ['fear'],
+        lastChangedAtMessageId: ['lastChangedAtMessageId'],
+    };
+
+    for (const [field, aliases] of Object.entries(fieldAliases)) {
+        const wasProvided = aliases.some(alias => Object.hasOwn(incoming, alias) && hasMeaningfulRelationshipValue(incoming[alias]));
+        if (wasProvided && hasMeaningfulRelationshipValue(normalized[field])) {
+            merged[field] = normalized[field];
+        }
+    }
+
+    for (const field of ['statusTags', 'notes']) {
+        const incoming = Array.isArray(normalized[field]) ? normalized[field].filter(Boolean) : [];
+        if (incoming.length) {
+            merged[field] = [...new Set([...(Array.isArray(merged[field]) ? merged[field] : []), ...incoming])];
+        }
+    }
+
+    return merged;
+}
+
+function updateDuplicateRelationshipOperation(proposalId, operationId) {
+    const context = getContext();
+    const { state } = readChatState(context);
+    const { operation } = findPendingOperation(state, proposalId, operationId);
+    if (!operationNeedsDuplicateRelationshipReview(operation)) return;
+
+    const index = Number(operation.duplicateRelationship.existingIndex);
+    const existing = state.persona?.relationships?.[index];
+    if (!Number.isInteger(index) || !existing) {
+        throw new Error('Existing relationship could not be found.');
+    }
+
+    const updated = normalizeOperation({
+        ...operation,
+        type: 'set',
+        path: `/relationships/${index}`,
+        oldValue: cloneJson(existing),
+        value: mergeRelationshipDuplicate(existing, operation.value),
+        targetLabel: operation.duplicateRelationship.existingName || operation.targetLabel,
+        changeType: operation.changeType || 'relationship update',
+        validationWarnings: (operation.validationWarnings || []).filter(warning => !/already exists/i.test(warning)),
+        duplicateRelationship: {
+            ...operation.duplicateRelationship,
+            status: 'resolved',
+            decision: 'updateExisting',
+        },
+        status: 'pending',
+    });
+    simulateOperations(state.persona, [updated]);
+    Object.assign(operation, updated);
+    writeChatState(context, state, { immediate: true });
+    renderPanel();
+    notify('Duplicate relationship converted to an update.');
+}
+
+function keepDuplicateRelationshipOperation(proposalId, operationId) {
+    const context = getContext();
+    const { state } = readChatState(context);
+    const { operation } = findPendingOperation(state, proposalId, operationId);
+    if (!operation.duplicateRelationship) return;
+
+    operation.duplicateRelationship = {
+        ...operation.duplicateRelationship,
+        status: 'resolved',
+        decision: 'keepBoth',
+    };
+    operation.validationWarnings = (operation.validationWarnings || []).filter(warning => !/already exists/i.test(warning));
+    writeChatState(context, state, { immediate: true });
+    renderPanel();
+    notify('Duplicate relationship will be kept as a separate entry.');
 }
 
 function rejectPendingOperation(proposalId, operationId) {
