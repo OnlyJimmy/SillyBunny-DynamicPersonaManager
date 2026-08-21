@@ -319,6 +319,32 @@
     padding: 0 12px 12px;
 }
 
+.dpm--character-section-tabs {
+    display: flex;
+    gap: 4px;
+    overflow-x: auto;
+    margin: 0 -12px 12px;
+    padding: 8px 12px 10px;
+    border-bottom: 1px solid var(--SmartThemeBorderColor);
+    scrollbar-width: thin;
+}
+
+.dpm--character-section-tabs button {
+    flex: 0 0 auto;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 6px;
+    padding: 7px 10px;
+    background: rgba(0, 0, 0, 0.08);
+    color: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.dpm--character-section-tabs button.active {
+    background: var(--SmartThemeQuoteColor);
+    color: var(--SmartThemeBodyColor);
+}
+
 .dpm--section,
 .dpm--empty,
 .dpm--history-entry,
@@ -361,6 +387,21 @@
     cursor: pointer;
     font-weight: 700;
     text-align: left;
+}
+
+.dpm--section-title {
+    display: inline-flex;
+    align-items: center;
+    min-width: 0;
+    gap: 8px;
+    padding: 4px 0;
+    font-weight: 700;
+}
+
+.dpm--section-title span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .dpm--section-toggle span {

@@ -49,6 +49,7 @@ import { bindDockableHandle, parseStoredHandlePosition } from './src/ui/handle.j
 let initialized = false;
 let panelOpen = false;
 let activeTab = getLocalValue(LOCAL_STORAGE_KEYS.lastTab) || 'character';
+let activeCharacterSection = getLocalValue(LOCAL_STORAGE_KEYS.lastCharacterSection) || 'overview';
 let panelLocked = getLocalValue(LOCAL_STORAGE_KEYS.panelLocked) === 'true';
 let cleanupHandle = null;
 let collapsedSections = readCollapsedSections();
@@ -93,6 +94,7 @@ const PROMPT_MODE_DESCRIPTIONS = Object.freeze({
 });
 
 const PROMPT_SECTION_OPTIONS = Object.freeze(SECTION_ORDER.filter(section => section !== 'overview'));
+const CHARACTER_SECTION_TABS = Object.freeze([...SECTION_ORDER, 'advancedJson']);
 
 function shouldBlockChatSendDuringOperation() {
     return !!getSettings().blockChatSendDuringOperation && activeDpmOperationCount > 0;
@@ -548,6 +550,7 @@ function renderCharacterTab(state) {
         `;
     }
 
+    if (!CHARACTER_SECTION_TABS.includes(activeCharacterSection)) activeCharacterSection = 'overview';
     renderingPersona = state.persona;
     return `
         <div class="dpm--sticky-actions">
@@ -560,13 +563,31 @@ function renderCharacterTab(state) {
                 <button class="dpm--action-button" type="button" data-action="import-json"><i class="fa-solid fa-file-import"></i><span>Import</span></button>
             </div>
         </div>
-        ${renderOverviewSection(state)}
-        ${renderIdentitySection(state.persona)}
-        ${renderAppearanceSection(state.persona)}
-        ${renderPersonalitySection(state.persona)}
-        ${Object.keys(COLLECTION_LABELS).map(collectionName => renderCollectionSection(state.persona, collectionName)).join('')}
-        ${renderAdvancedJsonSection(state)}
+        ${renderCharacterSectionTabs()}
+        ${renderActiveCharacterSection(state, activeCharacterSection)}
     `;
+}
+
+function renderCharacterSectionTabs() {
+    return `
+        <nav class="dpm--character-section-tabs" aria-label="Character sections">
+            ${CHARACTER_SECTION_TABS.map(sectionName => `
+                <button class="${sectionName === activeCharacterSection ? 'active' : ''}" type="button" data-action="select-character-section" data-section="${escapeHtml(sectionName)}" aria-pressed="${sectionName === activeCharacterSection ? 'true' : 'false'}">
+                    ${escapeHtml(SECTION_LABELS[sectionName] || sectionName)}
+                </button>
+            `).join('')}
+        </nav>
+    `;
+}
+
+function renderActiveCharacterSection(state, sectionName) {
+    if (sectionName === 'overview') return renderOverviewSection(state, { tabbed: true });
+    if (sectionName === 'identity') return renderIdentitySection(state.persona, { tabbed: true });
+    if (sectionName === 'appearance') return renderAppearanceSection(state.persona, { tabbed: true });
+    if (sectionName === 'personality') return renderPersonalitySection(state.persona, { tabbed: true });
+    if (sectionName === 'advancedJson') return renderAdvancedJsonSection(state, { tabbed: true });
+    if (Object.hasOwn(COLLECTION_LABELS, sectionName)) return renderCollectionSection(state.persona, sectionName, { tabbed: true });
+    return renderOverviewSection(state, { tabbed: true });
 }
 
 function isSectionCollapsed(sectionName) {
@@ -695,16 +716,19 @@ async function onDocumentClick(event) {
     }
 }
 
-function renderSectionShell(sectionName, content, actions = '') {
-    const collapsed = isSectionCollapsed(sectionName);
+function renderSectionShell(sectionName, content, actions = '', options = {}) {
+    const tabbed = !!options.tabbed;
+    const collapsed = !tabbed && isSectionCollapsed(sectionName);
     const lockControls = renderLockControls(getSectionLockPath(sectionName), { compact: true });
     return `
-        <section class="dpm--section ${collapsed ? 'dpm--collapsed' : ''}" data-section="${escapeHtml(sectionName)}">
+        <section class="dpm--section ${collapsed ? 'dpm--collapsed' : ''} ${tabbed ? 'dpm--section-tabbed' : ''}" data-section="${escapeHtml(sectionName)}">
             <div class="dpm--section-header">
-                <button class="dpm--section-toggle" type="button" data-action="toggle-section" data-section="${escapeHtml(sectionName)}" aria-expanded="${collapsed ? 'false' : 'true'}">
-                    <i class="fa-solid fa-chevron-${collapsed ? 'right' : 'down'}"></i>
-                    <span>${escapeHtml(SECTION_LABELS[sectionName] || sectionName)}</span>
-                </button>
+                ${tabbed
+                    ? `<div class="dpm--section-title"><span>${escapeHtml(SECTION_LABELS[sectionName] || sectionName)}</span></div>`
+                    : `<button class="dpm--section-toggle" type="button" data-action="toggle-section" data-section="${escapeHtml(sectionName)}" aria-expanded="${collapsed ? 'false' : 'true'}">
+                        <i class="fa-solid fa-chevron-${collapsed ? 'right' : 'down'}"></i>
+                        <span>${escapeHtml(SECTION_LABELS[sectionName] || sectionName)}</span>
+                    </button>`}
                 <div class="dpm--section-actions">${lockControls}${actions}</div>
             </div>
             <div class="dpm--section-body">
@@ -728,7 +752,7 @@ function renderListInput(path, label, value) {
     return `<label>${escapeHtml(label)} ${renderLockControls(editorPathToPointer(path), { compact: true })}<textarea class="text_pole dpm--field" rows="3" data-path="${escapeHtml(path)}" data-kind="list">${escapeHtml(listToText(value))}</textarea></label>`;
 }
 
-function renderOverviewSection(state) {
+function renderOverviewSection(state, options = {}) {
     const persona = state.persona;
     return renderSectionShell('overview', `
         <div class="dpm--field-grid">
@@ -736,10 +760,10 @@ function renderOverviewSection(state) {
             ${renderListInput('aliases', 'Aliases', persona.aliases)}
         </div>
         ${renderTextInput('summary', 'Summary', persona.summary, { rows: 5 })}
-    `);
+    `, '', options);
 }
 
-function renderIdentitySection(persona) {
+function renderIdentitySection(persona, options = {}) {
     const identity = persona.identity ?? {};
     return renderSectionShell('identity', `
         <div class="dpm--field-grid">
@@ -756,10 +780,10 @@ function renderIdentitySection(persona) {
         </div>
         ${renderListInput('identity.affiliationsText', 'Affiliations notes', (identity.affiliations || []).map(item => item.name || item.notes || '').filter(Boolean))}
         ${renderTextInput('identity.backstorySummary', 'Backstory summary', identity.backstorySummary, { rows: 5 })}
-    `);
+    `, '', options);
 }
 
-function renderAppearanceSection(persona) {
+function renderAppearanceSection(persona, options = {}) {
     const appearance = persona.appearance ?? {};
     return renderSectionShell('appearance', `
         ${renderTextInput('appearance.baseDescription', 'Base description', appearance.baseDescription, { rows: 4 })}
@@ -775,10 +799,10 @@ function renderAppearanceSection(persona) {
         ${renderListInput('appearance.distinguishingFeatures', 'Distinguishing features', appearance.distinguishingFeatures)}
         ${renderListInput('appearance.temporaryChanges', 'Temporary changes', appearance.temporaryChanges)}
         ${renderTextInput('appearance.other', 'Other', appearance.other, { rows: 3 })}
-    `);
+    `, '', options);
 }
 
-function renderPersonalitySection(persona) {
+function renderPersonalitySection(persona, options = {}) {
     const personality = persona.personality ?? {};
     return renderSectionShell('personality', `
         <div class="dpm--field-grid">
@@ -793,10 +817,10 @@ function renderPersonalitySection(persona) {
         ${renderTextInput('personality.speechStyle', 'Speech style', personality.speechStyle, { rows: 3 })}
         ${renderTextInput('personality.temporaryMood', 'Temporary mood', personality.temporaryMood)}
         ${renderListInput('personality.developmentNotes', 'Development notes', personality.developmentNotes)}
-    `);
+    `, '', options);
 }
 
-function renderCollectionSection(persona, collectionName) {
+function renderCollectionSection(persona, collectionName, options = {}) {
     const entries = Array.isArray(persona[collectionName]) ? persona[collectionName] : [];
     const actions = `
         <button class="menu_button menu_button_icon" type="button" data-action="add-entry" data-collection="${escapeHtml(collectionName)}" title="Add ${escapeHtml(COLLECTION_LABELS[collectionName])}">
@@ -806,7 +830,7 @@ function renderCollectionSection(persona, collectionName) {
     const body = entries.length
         ? entries.map((entry, index) => renderCollectionEntry(collectionName, entry, index)).join('')
         : '<div class="dpm--empty-inline">No entries yet.</div>';
-    return renderSectionShell(collectionName, body, actions);
+    return renderSectionShell(collectionName, body, actions, options);
 }
 
 function renderCollectionEntry(collectionName, entry, index) {
@@ -894,7 +918,7 @@ function renderEntryField(collectionName, index, entry, field, label, type) {
     return `<label>${escapeHtml(label)} ${lockControls}<input class="text_pole dpm--collection-field" type="${inputType}" data-path="${escapeHtml(path)}" data-type="${escapeHtml(type)}" value="${escapeHtml(value ?? '')}"></label>`;
 }
 
-function renderAdvancedJsonSection(state) {
+function renderAdvancedJsonSection(state, options = {}) {
     return renderSectionShell('advancedJson', `
         <p class="dpm--muted">Advanced fallback. Saving here replaces the structured form values after validation.</p>
         <textarea id="dpm--persona-json" class="text_pole dpm--json-editor" spellcheck="false">${escapeHtml(JSON.stringify(state.persona, null, 2))}</textarea>
@@ -904,7 +928,7 @@ function renderAdvancedJsonSection(state) {
             <button class="dpm--action-button" type="button" data-action="export-native-text"><i class="fa-solid fa-user-pen"></i><span>Export native</span></button>
             <button class="dpm--action-button" type="button" data-action="export-backup"><i class="fa-solid fa-box-archive"></i><span>Export backup</span></button>
         </div>
-    `);
+    `, '', options);
 }
 
 function renderPendingTab(state) {
@@ -1278,6 +1302,7 @@ async function onPanelClick(event) {
         if (action === 'create-blank') createBlankForChat();
         if (action === 'save-persona') savePersonaFromEditor();
         if (action === 'save-section-editor') savePersonaFromSectionEditor();
+        if (action === 'select-character-section') selectCharacterSection(button.dataset.section);
         if (action === 'toggle-section') toggleSection(button.dataset.section);
         if (action === 'toggle-entry') toggleEntry(button.dataset.entryKey);
         if (action === 'add-entry') addCollectionEntry(button.dataset.collection);
@@ -1326,6 +1351,13 @@ function toggleSection(sectionName) {
     if (collapsedSections.has(sectionName)) collapsedSections.delete(sectionName);
     else collapsedSections.add(sectionName);
     storeCollapsedSections(collapsedSections);
+    renderPanel();
+}
+
+function selectCharacterSection(sectionName) {
+    if (!CHARACTER_SECTION_TABS.includes(sectionName)) return;
+    activeCharacterSection = sectionName;
+    setLocalValue(LOCAL_STORAGE_KEYS.lastCharacterSection, activeCharacterSection);
     renderPanel();
 }
 

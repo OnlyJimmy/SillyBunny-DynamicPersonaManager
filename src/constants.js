@@ -16,6 +16,7 @@ export const LOCAL_STORAGE_KEYS = Object.freeze({
     panelLocked: 'dpm--panel-locked',
     panelWidth: 'dpm--panel-width',
     lastTab: 'dpm--panel-last-tab',
+    lastCharacterSection: 'dpm--character-section-last-tab',
     collapsedSections: 'dpm--collapsed-sections',
     collapsedEntries: 'dpm--collapsed-entries',
 });
