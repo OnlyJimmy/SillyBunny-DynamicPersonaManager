@@ -402,6 +402,21 @@
     min-height: 72px;
 }
 
+.dpm--custom-content-field {
+    grid-column: 1 / -1;
+}
+
+.dpm--custom-content-field small {
+    display: block;
+    margin: 2px 0 5px;
+}
+
+.dpm--custom-content-editor {
+    min-height: 140px;
+    font-family: var(--monoFontFamily, monospace);
+    resize: vertical;
+}
+
 .dpm--entry {
     border: 1px solid var(--SmartThemeBorderColor);
     border-radius: 8px;

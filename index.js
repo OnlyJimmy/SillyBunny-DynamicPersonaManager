@@ -35,6 +35,7 @@ import {
     SECTION_LABELS,
     coerceEditorValue,
     createDefaultCollectionEntry,
+    customEntriesToText,
     getCollectionItemTitle,
     listToText,
     readCollapsedEntries,
@@ -830,8 +831,42 @@ function renderCollectionEntry(collectionName, entry, index) {
             </div>
             <div class="dpm--entry-fields" ${collapsed ? 'hidden' : ''}>
                 ${definitions.map(([field, label, type]) => renderEntryField(collectionName, index, entry, field, label, type)).join('')}
+                ${collectionName === 'customSections' ? renderCustomSectionContentField(index, entry) : ''}
             </div>
         </article>
+    `;
+}
+
+function getCustomSectionContentLabel(entryType) {
+    switch (entryType) {
+        case 'text': return 'Text content';
+        case 'table': return 'Table content';
+        case 'json': return 'JSON content';
+        case 'list':
+        default: return 'List content';
+    }
+}
+
+function getCustomSectionContentHint(entryType) {
+    switch (entryType) {
+        case 'text': return 'Stored as one text entry.';
+        case 'table': return 'Use a tab-separated table with headers, or paste a JSON array of row objects.';
+        case 'json': return 'Paste a JSON array, object, string, or value. Non-array JSON is stored as one entry.';
+        case 'list':
+        default: return 'One entry per line.';
+    }
+}
+
+function renderCustomSectionContentField(index, entry) {
+    const entryType = entry?.entryType || 'list';
+    const label = getCustomSectionContentLabel(entryType);
+    const hint = getCustomSectionContentHint(entryType);
+    const path = `customSections.${index}.entries`;
+    return `
+        <label class="dpm--custom-content-field">${escapeHtml(label)} ${renderLockControls(editorPathToPointer(path), { compact: true })}
+            <small class="dpm--muted">${escapeHtml(hint)}</small>
+            <textarea class="text_pole dpm--collection-field dpm--custom-content-editor" rows="6" data-path="${escapeHtml(path)}" data-type="customEntries:${escapeHtml(entryType)}" spellcheck="false">${escapeHtml(customEntriesToText(entry?.entries, entryType))}</textarea>
+        </label>
     `;
 }
 

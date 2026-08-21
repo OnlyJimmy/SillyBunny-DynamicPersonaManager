@@ -4,10 +4,12 @@ import {
     COLLECTION_LABELS,
     coerceEditorValue,
     createDefaultCollectionEntry,
+    customEntriesToText,
     getCollectionItemTitle,
     listToText,
     readCollapsedEntries,
     storeCollapsedEntries,
+    textToCustomEntries,
     textToList,
 } from '../src/ui/character-editor.js';
 import { validatePersona } from '../src/state/schema.js';
@@ -35,6 +37,17 @@ test('editor value coercion handles common form field types', () => {
     assert.equal(coerceEditorValue('42', 'number'), 42);
     assert.equal(coerceEditorValue(true, 'checkbox'), true);
     assert.equal(coerceEditorValue('active', 'select:active|inactive'), 'active');
+});
+
+test('custom section content helpers handle text list table and json entries', () => {
+    assert.deepEqual(textToCustomEntries('Long property note.', 'text'), ['Long property note.']);
+    assert.deepEqual(textToCustomEntries('Key\nCellar', 'list'), ['Key', 'Cellar']);
+    assert.deepEqual(textToCustomEntries('room\towner\nKitchen\tRen', 'table'), [{ room: 'Kitchen', owner: 'Ren' }]);
+    assert.deepEqual(textToCustomEntries('{"value":42}', 'json'), [{ value: 42 }]);
+
+    assert.equal(customEntriesToText(['Long property note.'], 'text'), 'Long property note.');
+    assert.equal(customEntriesToText([{ room: 'Kitchen', owner: 'Ren' }], 'table'), 'room\towner\nKitchen\tRen');
+    assert.equal(customEntriesToText([{ value: 42 }], 'json'), '[\n  {\n    "value": 42\n  }\n]');
 });
 
 test('collection titles prefer human-readable fields', () => {

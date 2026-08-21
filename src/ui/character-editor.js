@@ -200,12 +200,80 @@ export function textToList(value) {
         .filter(Boolean);
 }
 
+function uniqueHeaders(rows) {
+    const headers = [];
+    for (const row of Array.isArray(rows) ? rows : []) {
+        if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+        for (const key of Object.keys(row)) {
+            if (!headers.includes(key)) headers.push(key);
+        }
+    }
+    return headers;
+}
+
+function escapeTableCell(value) {
+    return String(value ?? '').replace(/\r?\n/g, ' ');
+}
+
+export function customEntriesToText(entries, entryType = 'list') {
+    const value = Array.isArray(entries) ? entries : [];
+    if (entryType === 'text') return value.map(item => typeof item === 'string' ? item : JSON.stringify(item)).join('\n\n');
+    if (entryType === 'json') return JSON.stringify(value, null, 2);
+    if (entryType === 'table') {
+        const headers = uniqueHeaders(value);
+        if (!headers.length) return '';
+        const lines = [headers.join('\t')];
+        for (const row of value) {
+            lines.push(headers.map(header => escapeTableCell(row?.[header])).join('\t'));
+        }
+        return lines.join('\n');
+    }
+    return value.map(item => typeof item === 'string' ? item : JSON.stringify(item)).join('\n');
+}
+
+function parseTableText(value) {
+    const text = String(value ?? '').trim();
+    if (!text) return [];
+    if (/^\s*[\[{]/.test(text)) {
+        const parsed = JSON.parse(text);
+        return Array.isArray(parsed) ? parsed : [parsed];
+    }
+
+    const lines = text.split(/\r?\n/).filter(line => line.trim());
+    if (!lines.length) return [];
+    const delimiter = lines.some(line => line.includes('\t')) ? '\t' : ',';
+    const headers = lines[0].split(delimiter).map(header => header.trim()).filter(Boolean);
+    return lines.slice(1).map(line => {
+        const cells = line.split(delimiter);
+        return Object.fromEntries(headers.map((header, index) => [header, cells[index]?.trim() ?? '']));
+    });
+}
+
+export function textToCustomEntries(value, entryType = 'list') {
+    const text = String(value ?? '');
+    if (!text.trim()) return [];
+    if (entryType === 'text') return [text];
+    if (entryType === 'json') {
+        const parsed = JSON.parse(text);
+        return Array.isArray(parsed) ? parsed : [parsed];
+    }
+    if (entryType === 'table') return parseTableText(text);
+    return textToList(text);
+}
+
 export function coerceEditorValue(value, type, fallback = null) {
     if (type === 'checkbox') return !!value;
     if (type === 'number') {
         if (value === '' || value === null || value === undefined) return null;
         const number = Number(value);
         return Number.isFinite(number) ? number : fallback;
+    }
+    if (type.startsWith('customEntries:')) {
+        try {
+            return textToCustomEntries(value, type.slice('customEntries:'.length));
+        } catch {
+            return fallback;
+        }
     }
     if (type.startsWith('select:')) return String(value ?? '');
     return String(value ?? '');
