@@ -85,6 +85,10 @@ The SillyBunny extension settings panel includes:
 
 When automatic analysis is enabled, DPM inspects the latest completed user/assistant pair after generation. The analyser must return JSON operations, not a replacement persona.
 
+Every analysis includes formatting templates for all managed sections, including empty collections, followed by a JSON snapshot of current state and the message pair. The instructions cover adding new entries, updating matching entries by exact field path, and removing obsolete entries without duplicating existing data. Analysis-hidden values are omitted while array indices are preserved; disabled custom sections are excluded. Custom analyser instructions supplement the built-in format and editing rules.
+
+If the complete request exceeds the configured Analysis context limit, analysis reports an error asking you to increase that limit. DPM does not silently truncate section templates, state, or message evidence. The limit uses a character-based token estimate; actual model token counts may differ.
+
 DPM then:
 
 1. Parses the response, retrying malformed output if configured.

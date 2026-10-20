@@ -8,6 +8,7 @@ import { user_avatar } from '../../../personas.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
 import { DEFAULT_GLOBAL_SETTINGS, DISPLAY_NAME, LOCAL_STORAGE_KEYS, MODULE_NAME, PANEL_EVENT, PANEL_ID, PROMPT_MODES, SECTION_ORDER } from './src/constants.js';
 import { analysePair } from './src/analysis/analyser.js';
+import { checkAnalysisContext } from './src/analysis/context-limit.js';
 import { analyseManualInstruction } from './src/analysis/manual-instruction.js';
 import { findLatestCompletedPair, fingerprintPair, hasAnalysedFingerprint, rememberAnalysedFingerprint } from './src/analysis/fingerprints.js';
 import { annotateProposalStaleness, getProposalSourceState } from './src/analysis/staleness.js';
@@ -275,10 +276,7 @@ async function generateDpmRaw({ prompt, responseLength, signal }) {
     try {
         const profile = getSelectedAnalysisProfile();
         const contextLimit = Math.max(1000, Number(getSettings().analysisContextLimit || 6000));
-        const maximumCharacters = contextLimit * 4;
-        const requestPrompt = String(prompt || '').length > maximumCharacters
-            ? `[Earlier DPM analysis context omitted to fit the configured limit.]\n\n${String(prompt).slice(-maximumCharacters)}`
-            : prompt;
+        const requestPrompt = checkAnalysisContext(prompt, contextLimit);
         if (!profile) {
             return await getContext().generateRaw({
                 prompt: requestPrompt,
