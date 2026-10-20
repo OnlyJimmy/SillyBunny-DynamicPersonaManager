@@ -1,6 +1,7 @@
 import { buildAnalysisPrompt } from './prompt-builder.js';
 import { parseAnalysisResponse } from './response-parser.js';
 import { buildValidatedProposal } from './validator.js';
+import { describeDebugError } from './debug-log.js';
 
 const JSON_OUTPUT_RULES = `OUTPUT REQUIREMENT: Return ONLY one complete, valid JSON object. No markdown fences, commentary, reasoning, XML, or text before or after it.
 Use double quotes for every key and string. Escape double quotes, backslashes, and line breaks inside strings (\\\", \\\\, \\n). Use commas between properties and array elements; no trailing commas, comments, ellipses, undefined, NaN, or Infinity.
@@ -22,7 +23,7 @@ If there are no safe persona changes, return the same object with an empty opera
 Previous error: ${error.message}`;
 }
 
-export async function generateParsedAnalysis({ generate, prompt, responseLength, signal, retryLimit }) {
+export async function generateParsedAnalysis({ generate, prompt, responseLength, signal, retryLimit, onDebug = () => {} }) {
     const warnings = [];
     const malformedResponses = [];
     let lastError = null;
@@ -30,6 +31,7 @@ export async function generateParsedAnalysis({ generate, prompt, responseLength,
     const strictPrompt = `${JSON_OUTPUT_RULES}\n\n${prompt}\n\n${JSON_OUTPUT_RULES}`;
 
     for (let attempt = 0; attempt <= retryLimit; attempt += 1) {
+        onDebug('response.attempt', { attempt: attempt + 1, retryLimit, responseLength });
         const raw = await generate({
             prompt: attempt === 0 ? strictPrompt : buildRetryPrompt(strictPrompt, lastError, attempt),
             responseLength,
@@ -40,6 +42,7 @@ export async function generateParsedAnalysis({ generate, prompt, responseLength,
 
         try {
             const parsedResponse = parseAnalysisResponse(raw);
+            onDebug('response.parsed', { attempt: attempt + 1, operations: parsedResponse.operations.length, responseCharacters: String(raw ?? '').length });
             if (attempt > 0) {
                 warnings.push({
                     code: 'analysisResponseRetrySucceeded',
@@ -49,6 +52,7 @@ export async function generateParsedAnalysis({ generate, prompt, responseLength,
             return { parsedResponse, warnings, malformedResponses };
         } catch (error) {
             lastError = error;
+            onDebug('response.invalid', { attempt: attempt + 1, responseCharacters: String(raw ?? '').length, ...describeDebugError(error) });
             malformedResponses.push({ attempt: attempt + 1, rawResponse: String(raw ?? ''), error: error.message });
             if (attempt < retryLimit) {
                 warnings.push({
@@ -64,7 +68,7 @@ export async function generateParsedAnalysis({ generate, prompt, responseLength,
     throw error;
 }
 
-export async function analysePair({ context, persona, pair, fingerprint, settings = {}, signal, generateRaw = null }) {
+export async function analysePair({ context, persona, pair, fingerprint, settings = {}, signal, generateRaw = null, onDebug = () => {} }) {
     const generate = generateRaw || context.generateRaw;
     if (typeof generate !== 'function') {
         throw new Error('No analysis generation function is available.');
@@ -82,6 +86,7 @@ export async function analysePair({ context, persona, pair, fingerprint, setting
         responseLength: Number(settings.responseTokenAllowance ?? 800),
         signal,
         retryLimit,
+        onDebug,
     });
     const source = {
         type: 'latest-pair',

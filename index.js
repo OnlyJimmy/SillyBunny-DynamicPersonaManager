@@ -11,6 +11,7 @@ import { analysePair } from './src/analysis/analyser.js';
 import { checkAnalysisContext } from './src/analysis/context-limit.js';
 import { createMalformedResponseRecord, recoverAnalysisResponse } from './src/analysis/recovery.js';
 import { createAnalysisRunGuard, hasAttemptedPair, isAuxiliaryGeneration } from './src/analysis/run-guard.js';
+import { createDebugLog, describeDebugError } from './src/analysis/debug-log.js';
 import { analyseManualInstruction } from './src/analysis/manual-instruction.js';
 import { findLatestCompletedPair, fingerprintPair, hasAnalysedFingerprint, rememberAnalysedFingerprint } from './src/analysis/fingerprints.js';
 import { annotateProposalStaleness, getProposalSourceState } from './src/analysis/staleness.js';
@@ -64,6 +65,11 @@ const analysisRunGuard = createAnalysisRunGuard();
 let queuedAnalysisChat = null;
 let renderingPersona = null;
 let activeDpmOperationCount = 0;
+let debugStorage = null;
+try { debugStorage = globalThis.localStorage; } catch { /* Use memory when browser storage is unavailable. */ }
+const debugLog = createDebugLog({ isEnabled: () => !!getSettings().debugMode, storage: debugStorage });
+const recordDebug = (event, details) => debugLog.record(event, details);
+let debugRequestId = 0;
 let sendGuardBound = false;
 const sendControlPreviousState = new WeakMap();
 
@@ -276,19 +282,24 @@ function getSelectedAnalysisProfile() {
 }
 
 async function generateDpmRaw({ prompt, responseLength, signal }) {
+    const requestId = ++debugRequestId;
+    const startedAt = Date.now();
     beginDpmOperation();
     try {
         const profile = getSelectedAnalysisProfile();
         const contextLimit = Math.max(1000, Number(getSettings().analysisContextLimit || 6000));
         const requestPrompt = checkAnalysisContext(prompt, contextLimit);
+        recordDebug('request.started', { requestId, promptCharacters: String(requestPrompt).length, responseLength, contextLimit, route: profile ? 'dedicated-profile' : 'current-connection' });
         if (!profile) {
-            return await getContext().generateRaw({
+            const response = await getContext().generateRaw({
                 prompt: requestPrompt,
                 responseLength,
                 trimNames: true,
                 cacheScope: 'auxiliary',
                 signal,
             });
+            recordDebug('request.completed', { requestId, durationMs: Date.now() - startedAt, responseCharacters: String(response ?? '').length });
+            return response;
         }
 
         const response = await ConnectionManagerRequestService.sendRequest(
@@ -297,7 +308,12 @@ async function generateDpmRaw({ prompt, responseLength, signal }) {
             Number(responseLength || getSettings().responseTokenAllowance || 800),
             { stream: false, signal, extractData: true, includePreset: true, includeInstruct: true },
         );
-        return String(response?.content || response?.text || response || '').trim();
+        const text = String(response?.content || response?.text || response || '').trim();
+        recordDebug('request.completed', { requestId, durationMs: Date.now() - startedAt, responseCharacters: text.length });
+        return text;
+    } catch (error) {
+        recordDebug('request.failed', { requestId, durationMs: Date.now() - startedAt, ...describeDebugError(error) });
+        throw error;
     } finally {
         endDpmOperation();
     }
@@ -1289,6 +1305,15 @@ function renderSettingsTab(state) {
                 <button class="dpm--action-button" type="button" data-action="clear-malformed-response">Clear saved responses</button>
             </details>` : ''}
             ${warnings.length ? `<details><summary>Last validation warnings</summary><ul>${warnings.map(warning => `<li>${escapeHtml(warning.message || warning)}</li>`).join('')}</ul></details>` : ''}
+            <details><summary>Debug log</summary>
+                <p>Records the latest 200 events in this browser, across chats, and keeps them after reload. Contains timing, event flow, counts, and error categories; excludes chat/persona text, prompts, raw responses, and credentials.</p>
+                <div class="dpm--button-row">
+                    <button class="dpm--action-button" type="button" data-action="toggle-debug-log">${getSettings().debugMode ? 'Disable debug logging' : 'Enable debug logging'}</button>
+                    <button class="dpm--action-button" type="button" data-action="copy-debug-log">Copy debug log</button>
+                    <button class="dpm--action-button" type="button" data-action="view-debug-log">View debug log</button>
+                    <button class="dpm--action-button" type="button" data-action="clear-debug-log">Clear debug log</button>
+                </div>
+            </details>
             <div class="dpm--button-row">
                 <button class="dpm--action-button dpm--danger-action" type="button" data-action="cancel-dpm-actions"><i class="fa-solid fa-ban"></i><span>Cancel actions</span></button>
                 <button class="dpm--action-button" type="button" data-action="reanalyse-latest-pair"><i class="fa-solid fa-rotate"></i><span>Scan latest pair</span></button>
@@ -1335,6 +1360,18 @@ async function onPanelClick(event) {
         if (action === 'reject-all-operations') rejectAllPendingOperations();
         if (action === 'cancel-dpm-actions') cancelAllDpmActions();
         if (action === 'reanalyse-latest-pair') reanalyseLatestPair();
+        if (action === 'toggle-debug-log') {
+            const settings = getSettings();
+            recordDebug('debug.disabled');
+            settings.debugMode = !settings.debugMode;
+            recordDebug('debug.enabled');
+            saveSettingsDebounced();
+            const checkbox = document.getElementById('dpm--debug');
+            if (checkbox) checkbox.checked = settings.debugMode;
+            renderPanel();
+        }
+        if (action === 'copy-debug-log' || action === 'view-debug-log') await showDebugLog(action === 'copy-debug-log');
+        if (action === 'clear-debug-log') { debugLog.clear(); notify('Debug log cleared.'); }
         if (action === 'edit-malformed-response') await editMalformedAnalysisResponse();
         if (action === 'clear-malformed-response') {
             const context = getContext();
@@ -2086,6 +2123,28 @@ async function analyseManualInstructionFromPromptTab() {
     notify(`Created ${result.proposal.operations.length} pending manual change${result.proposal.operations.length === 1 ? '' : 's'}.`);
 }
 
+async function showDebugLog(copy = false) {
+    const { state } = readChatState(getContext());
+    const settings = getSettings();
+    const report = debugLog.report({
+        contextLimit: Number(settings.analysisContextLimit), responseLength: Number(settings.responseTokenAllowance),
+        retryLimit: Number(settings.analysisMalformedRetryLimit), failures: Number(state.analysisState?.failures || 0),
+        automaticAnalysis: !!state.chatSettings?.automaticAnalysis, paused: !!state.analysisState?.paused,
+        streamlinedMode: !!state.chatSettings?.streamlinedMode, confidenceThreshold: Number(settings.confidenceThreshold),
+        busy: analysisRunGuard.busy, activeOperations: activeDpmOperationCount,
+        reason: state.analysisState?.status || 'idle',
+        route: settings.analysisProfileId ? 'dedicated-profile' : 'current-connection',
+    });
+    if (copy) {
+        try {
+            await navigator.clipboard.writeText(report);
+            notify('Debug log copied. Paste it into your support chat.');
+            return;
+        } catch { /* Fall back to a selectable report when clipboard access is unavailable. */ }
+    }
+    await callGenericPopup(`<h3>DPM debug log</h3><p>Select and copy this report to share it.</p><textarea class="text_pole" rows="20" readonly>${escapeHtml(report)}</textarea>`, POPUP_TYPE.TEXT, '', { wide: true });
+}
+
 async function editMalformedAnalysisResponse() {
     const context = getContext();
     const { state: initialState } = readChatState(context);
@@ -2329,6 +2388,7 @@ function createDemoProposal() {
 }
 
 function cancelActiveAnalysis() {
+    recordDebug('analysis.cancelled', { runId: analysisRunId, busy: analysisRunGuard.busy });
     queuedAnalysisChat = null;
     if (scheduledAnalysisTimer !== null) {
         clearTimeout(scheduledAnalysisTimer);
@@ -2360,7 +2420,11 @@ function cancelAllDpmActions() {
 }
 
 function scheduleLatestPairAnalysis(delay = 150) {
-    if (activeDpmOperationCount > 0 || analysisRunGuard.busy) return;
+    if (activeDpmOperationCount > 0 || analysisRunGuard.busy) {
+        recordDebug('schedule.skipped', { reason: 'operation-active', busy: analysisRunGuard.busy, activeOperations: activeDpmOperationCount });
+        return;
+    }
+    recordDebug('schedule.queued', { delay });
     if (scheduledAnalysisTimer !== null) {
         clearTimeout(scheduledAnalysisTimer);
     }
@@ -2380,20 +2444,25 @@ function shouldRunAnalysis(state) {
 }
 
 async function runAnalysisForLatestPair() {
-    if (activeDpmOperationCount > 0 || analysisRunGuard.busy) return;
+    if (activeDpmOperationCount > 0 || analysisRunGuard.busy) {
+        recordDebug('analysis.skipped', { reason: 'operation-active' });
+        return;
+    }
     const context = getContext();
     const settings = getSettings();
     let { state } = readChatState(context);
     if (!shouldRunAnalysis(state)) {
+        recordDebug('analysis.skipped', { reason: 'disabled-or-paused' });
         refreshHandleState(state);
         return;
     }
 
     const pair = findLatestCompletedPair(context.chat);
-    if (!pair) return;
+    if (!pair) { recordDebug('analysis.skipped', { reason: 'no-completed-pair' }); return; }
     const fingerprint = fingerprintPair(pair);
     const analysisPersona = cloneJson(state.persona);
     if (hasAnalysedFingerprint(state.analysisState, fingerprint) || hasAttemptedPair(state.analysisState, fingerprint)) {
+        recordDebug('analysis.skipped', { reason: 'pair-already-attempted' });
         return;
     }
 
@@ -2402,6 +2471,8 @@ async function runAnalysisForLatestPair() {
 
     const runId = analysisRunId + 1;
     analysisRunId = runId;
+    const analysisStartedAt = Date.now();
+    recordDebug('analysis.started', { runId, userIndex: pair.userIndex, assistantIndex: pair.assistantIndex, swipeId: pair.assistantSwipeId });
     analysisAbortController?.abort?.();
     analysisAbortController = typeof AbortController === 'function' ? new AbortController() : null;
 
@@ -2420,19 +2491,24 @@ async function runAnalysisForLatestPair() {
             settings,
             signal: analysisAbortController?.signal,
             generateRaw: generateDpmRaw,
+            onDebug: (event, details) => recordDebug(event, { runId, ...details }),
         });
-        if (runId !== analysisRunId) return;
+        if (runId !== analysisRunId) { recordDebug('analysis.discarded', { runId, reason: 'run-invalidated' }); return; }
 
         ({ state } = readChatState(context));
         if (!shouldRunAnalysis(state)) return;
         const currentPair = findLatestCompletedPair(context.chat);
-        if (!currentPair || fingerprintPair(currentPair) !== fingerprint) return;
+        if (!currentPair || fingerprintPair(currentPair) !== fingerprint) {
+            recordDebug('analysis.discarded', { runId, reason: 'source-pair-changed' });
+            return;
+        }
 
         state.analysisState.status = 'idle';
         state.analysisState.failures = 0;
         rememberAnalysedFingerprint(state.analysisState, fingerprint);
         state.analysisState.lastAnalysedAt = new Date().toISOString();
         state.analysisState.lastWarnings = result.warnings || [];
+        recordDebug('analysis.completed', { runId, durationMs: Date.now() - analysisStartedAt, operations: result.proposal?.operations?.length || 0, warnings: result.warnings?.length || 0 });
         if (result.malformedResponses?.length) {
             state.analysisState.malformedResponse = createMalformedResponseRecord({ attempts: result.malformedResponses, persona: analysisPersona, pair, handled: true });
         }
@@ -2478,6 +2554,7 @@ async function runAnalysisForLatestPair() {
         if (panelOpen) renderPanel();
         refreshHandleState(state);
     } catch (error) {
+        recordDebug('analysis.failed', { runId, durationMs: Date.now() - analysisStartedAt, ...describeDebugError(error) });
         if (runId !== analysisRunId || error?.name === 'AbortError') return;
 
         ({ state } = readChatState(context));
@@ -3113,7 +3190,9 @@ function injectSettingsPanel() {
         if (panelOpen) renderPanel();
     });
     parent.querySelector('#dpm--debug')?.addEventListener('change', event => {
+        if (!event.target.checked) recordDebug('debug.disabled');
         getSettings().debugMode = !!event.target.checked;
+        if (event.target.checked) recordDebug('debug.enabled');
         saveSettingsDebounced();
     });
 }
@@ -3122,6 +3201,7 @@ function bindEvents() {
     const context = getContext();
     const events = context.eventTypes ?? {};
     context.eventSource?.on?.(events.CHAT_CHANGED, () => {
+        recordDebug('event.chat-changed');
         cancelActiveAnalysis();
         ensureChatState(getContext());
         syncPersonaToActiveBranch('chat-changed');
@@ -3129,6 +3209,7 @@ function bindEvents() {
         if (panelOpen) renderPanel();
     });
     context.eventSource?.on?.(events.CHAT_LOADED, () => {
+        recordDebug('event.chat-loaded');
         cancelActiveAnalysis();
         ensureChatState(getContext());
         syncPersonaToActiveBranch('chat-loaded');
@@ -3136,17 +3217,21 @@ function bindEvents() {
         if (panelOpen) renderPanel();
     });
     context.eventSource?.on?.(events.GENERATION_STARTED, (type, options, dryRun) => {
-        if (isAuxiliaryGeneration(type, options, dryRun)) return;
+        const ignored = isAuxiliaryGeneration(type, options, dryRun);
+        recordDebug('event.generation-started', { generationType: ['normal', 'quiet', 'swipe', 'continue', 'regenerate', 'impersonate'].includes(type) ? type : 'other', ignored });
+        if (ignored) return;
         cancelActiveAnalysis();
         syncPersonaToActiveBranch('generation-started');
     });
     context.eventSource?.on?.(events.GENERATION_ENDED, () => {
+        recordDebug('event.generation-ended', { ignored: activeDpmOperationCount > 0 || analysisRunGuard.busy });
         if (activeDpmOperationCount > 0 || analysisRunGuard.busy) return;
         syncPersonaToActiveBranch('generation-ended');
         refreshPromptInjection();
         scheduleLatestPairAnalysis(100);
     });
     context.eventSource?.on?.(events.MESSAGE_SWIPED, () => {
+        recordDebug('event.message-swiped');
         cancelActiveAnalysis();
         syncPersonaToActiveBranch('message-swiped');
         refreshPromptInjection();
@@ -3154,21 +3239,25 @@ function bindEvents() {
         scheduleLatestPairAnalysis(600);
     });
     context.eventSource?.on?.(events.MESSAGE_EDITED, () => {
+        recordDebug('event.message-edited');
         cancelActiveAnalysis();
         syncPersonaToPreviousPairCheckpoint('message-edited');
         forceReanalyseLatestPair(250);
         if (panelOpen) renderPanel();
     });
     context.eventSource?.on?.(events.MESSAGE_RECEIVED, () => {
+        recordDebug('event.message-received');
         scheduleLatestPairAnalysis(150);
     });
     context.eventSource?.on?.(events.MESSAGE_DELETED, () => {
+        recordDebug('event.message-deleted');
         cancelActiveAnalysis();
         syncPersonaToActiveBranch('message-deleted');
         refreshPromptInjection();
         if (panelOpen) renderPanel();
     });
     context.eventSource?.on?.(events.MESSAGE_SWIPE_DELETED, () => {
+        recordDebug('event.message-swipe-deleted');
         cancelActiveAnalysis();
         syncPersonaToActiveBranch('message-swipe-deleted');
         refreshPromptInjection();
@@ -3180,6 +3269,7 @@ function bootstrap() {
     if (initialized) return;
     initialized = true;
     getSettings();
+    recordDebug('extension.loaded');
     ensureChatState(getContext());
     ensurePanelDom();
     injectSettingsPanel();

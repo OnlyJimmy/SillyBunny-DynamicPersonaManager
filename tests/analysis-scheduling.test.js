@@ -27,6 +27,7 @@ function harness(generate) {
         createAnalysisRunGuard, hasAttemptedPair, isAuxiliaryGeneration,
         findLatestCompletedPair, fingerprintPair, hasAnalysedFingerprint, rememberAnalysedFingerprint,
         cloneJson: structuredClone,
+        recordDebug: () => {}, describeDebugError: () => ({}),
         getContext: () => context,
         getSettings: () => ({ failurePauseThreshold: 3 }),
         readChatState: () => ({ state }), writeChatState: () => {},

@@ -190,6 +190,10 @@ node --test public/scripts/extensions/third-party/dynamic-persona-manager/tests/
 
 The extension directory may appear as ignored in the upstream SillyBunny repository because third-party extensions are ignored by default.
 
+## Debug Logging
+
+For troubleshooting, open the drawer's **Settings → Debug log**, enable logging, and reproduce the issue. Use **Copy debug log** to paste the report into a support chat, or **View debug log** to copy it manually if clipboard access is unavailable. The log keeps the latest 200 events across chats in this browser and survives reloads. It records generation events, scheduling decisions, run/request timing, retries, response sizes, operation/warning counts, and error categories/positions. It excludes message text, persona values, prompts, raw model responses, credentials, and connection URLs. Use the separate malformed-response viewer when you need to inspect the actual model output. **Clear debug log** removes saved events; disabling logging stops collection but retains existing events.
+
 ## Known Limits
 
 - Version 1 manages one player persona per chat.
