@@ -107,6 +107,8 @@ DPM then:
 
 Malformed output, fabricated evidence, stale proposals, protected paths, lock violations, invalid results, and failed transaction simulation do not mutate canonical state.
 
+Automatic analysis runs at most once per message-pair fingerprint, with the configured malformed-response retries inside that run. Auxiliary/quiet generation starts do not cancel analysis; DPM's own requests do not schedule more scans. Requests cannot overlap, even while an aborted provider is still settling. A failed pair is not automatically retried by repeated generation events. Use **Settings → Scan latest pair** to explicitly retry, or send a new message. If automatic analysis was paused after repeated failures, unpause it first.
+
 ## Streamlined Mode
 
 Streamlined Mode automatically approves valid analyser proposals. It is off by default and shows a one-time per-chat warning before enabling.

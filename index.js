@@ -10,6 +10,7 @@ import { DEFAULT_GLOBAL_SETTINGS, DISPLAY_NAME, LOCAL_STORAGE_KEYS, MODULE_NAME,
 import { analysePair } from './src/analysis/analyser.js';
 import { checkAnalysisContext } from './src/analysis/context-limit.js';
 import { createMalformedResponseRecord, recoverAnalysisResponse } from './src/analysis/recovery.js';
+import { createAnalysisRunGuard, hasAttemptedPair, isAuxiliaryGeneration } from './src/analysis/run-guard.js';
 import { analyseManualInstruction } from './src/analysis/manual-instruction.js';
 import { findLatestCompletedPair, fingerprintPair, hasAnalysedFingerprint, rememberAnalysedFingerprint } from './src/analysis/fingerprints.js';
 import { annotateProposalStaleness, getProposalSourceState } from './src/analysis/staleness.js';
@@ -59,6 +60,8 @@ let collapsedEntries = readCollapsedEntries();
 let analysisRunId = 0;
 let analysisAbortController = null;
 let scheduledAnalysisTimer = null;
+const analysisRunGuard = createAnalysisRunGuard();
+let queuedAnalysisChat = null;
 let renderingPersona = null;
 let activeDpmOperationCount = 0;
 let sendGuardBound = false;
@@ -2147,6 +2150,9 @@ function clearLatestPairAnalysisMemory(state, pair) {
     const fingerprint = fingerprintPair(pair);
     state.analysisState ??= {};
     state.analysisState.analysedFingerprints = (state.analysisState.analysedFingerprints || []).filter(item => item !== fingerprint);
+    if (state.analysisState.lastAttemptedFingerprint === fingerprint) {
+        state.analysisState.lastAttemptedFingerprint = '';
+    }
     if (state.analysisState.lastAnalysedFingerprint === fingerprint) {
         state.analysisState.lastAnalysedFingerprint = '';
     }
@@ -2158,6 +2164,10 @@ function forceReanalyseLatestPair(delay = 0) {
     const { state } = readChatState(context);
     const pair = findLatestCompletedPair(context.chat);
     if (!pair) return false;
+    if (analysisRunGuard.busy) {
+        cancelActiveAnalysis();
+        queuedAnalysisChat = context.chatMetadata;
+    }
     clearLatestPairAnalysisMemory(state, pair);
     writeChatState(context, state, { immediate: true });
     scheduleLatestPairAnalysis(delay);
@@ -2319,6 +2329,11 @@ function createDemoProposal() {
 }
 
 function cancelActiveAnalysis() {
+    queuedAnalysisChat = null;
+    if (scheduledAnalysisTimer !== null) {
+        clearTimeout(scheduledAnalysisTimer);
+        scheduledAnalysisTimer = null;
+    }
     analysisRunId += 1;
     analysisAbortController?.abort?.();
     analysisAbortController = null;
@@ -2345,6 +2360,7 @@ function cancelAllDpmActions() {
 }
 
 function scheduleLatestPairAnalysis(delay = 150) {
+    if (activeDpmOperationCount > 0 || analysisRunGuard.busy) return;
     if (scheduledAnalysisTimer !== null) {
         clearTimeout(scheduledAnalysisTimer);
     }
@@ -2364,6 +2380,7 @@ function shouldRunAnalysis(state) {
 }
 
 async function runAnalysisForLatestPair() {
+    if (activeDpmOperationCount > 0 || analysisRunGuard.busy) return;
     const context = getContext();
     const settings = getSettings();
     let { state } = readChatState(context);
@@ -2376,9 +2393,12 @@ async function runAnalysisForLatestPair() {
     if (!pair) return;
     const fingerprint = fingerprintPair(pair);
     const analysisPersona = cloneJson(state.persona);
-    if (hasAnalysedFingerprint(state.analysisState, fingerprint)) {
+    if (hasAnalysedFingerprint(state.analysisState, fingerprint) || hasAttemptedPair(state.analysisState, fingerprint)) {
         return;
     }
+
+    const runToken = analysisRunGuard.acquire();
+    if (!runToken) return;
 
     const runId = analysisRunId + 1;
     analysisRunId = runId;
@@ -2386,12 +2406,12 @@ async function runAnalysisForLatestPair() {
     analysisAbortController = typeof AbortController === 'function' ? new AbortController() : null;
 
     state.analysisState.status = 'analysing';
+    state.analysisState.lastAttemptedFingerprint = fingerprint;
     state.analysisState.lastError = '';
-    writeChatState(context, state);
-    if (panelOpen) renderPanel();
-    refreshHandleState(state);
-
     try {
+        writeChatState(context, state);
+        if (panelOpen) renderPanel();
+        refreshHandleState(state);
         const result = await analysePair({
             context,
             persona: state.persona,
@@ -2405,6 +2425,8 @@ async function runAnalysisForLatestPair() {
 
         ({ state } = readChatState(context));
         if (!shouldRunAnalysis(state)) return;
+        const currentPair = findLatestCompletedPair(context.chat);
+        if (!currentPair || fingerprintPair(currentPair) !== fingerprint) return;
 
         state.analysisState.status = 'idle';
         state.analysisState.failures = 0;
@@ -2474,6 +2496,26 @@ async function runAnalysisForLatestPair() {
         refreshHandleState(state);
         if (settings.debugMode) {
             notify(`DPM analysis failed: ${error.message}`, 'warning');
+        }
+    } finally {
+        analysisRunGuard.release(runToken);
+        // A genuine new pair may have arrived while an aborted provider was settling.
+        const currentContext = getContext();
+        const explicitRetryQueued = queuedAnalysisChat === currentContext.chatMetadata;
+        queuedAnalysisChat = null;
+        const currentPair = findLatestCompletedPair(currentContext.chat);
+        const { state: currentState } = readChatState(currentContext);
+        if (currentContext.chatMetadata === context.chatMetadata
+            && currentState.analysisState.status === 'analysing') {
+            currentState.analysisState.status = currentState.analysisState.paused ? 'paused' : 'idle';
+            writeChatState(currentContext, currentState);
+            refreshHandleState(currentState);
+            if (panelOpen) renderPanel();
+        }
+        if (shouldRunAnalysis(currentState) && currentPair
+            && (explicitRetryQueued || fingerprintPair(currentPair) !== fingerprint)
+            && !hasAttemptedPair(currentState.analysisState, fingerprintPair(currentPair))) {
+            scheduleLatestPairAnalysis();
         }
     }
 }
@@ -3093,11 +3135,13 @@ function bindEvents() {
         refreshPromptInjection();
         if (panelOpen) renderPanel();
     });
-    context.eventSource?.on?.(events.GENERATION_STARTED, () => {
+    context.eventSource?.on?.(events.GENERATION_STARTED, (type, options, dryRun) => {
+        if (isAuxiliaryGeneration(type, options, dryRun)) return;
         cancelActiveAnalysis();
         syncPersonaToActiveBranch('generation-started');
     });
     context.eventSource?.on?.(events.GENERATION_ENDED, () => {
+        if (activeDpmOperationCount > 0 || analysisRunGuard.busy) return;
         syncPersonaToActiveBranch('generation-ended');
         refreshPromptInjection();
         scheduleLatestPairAnalysis(100);
