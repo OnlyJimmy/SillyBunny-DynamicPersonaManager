@@ -93,6 +93,20 @@ test('overlapping requests cannot replace a running analysis', async () => {
     assert.equal(calls, 1);
 });
 
+test('timeout records a failure, releases the analysis slot, and does not automatically retry', async () => {
+    let calls = 0;
+    const { scope, state } = harness(async () => {
+        calls++;
+        throw Object.assign(new Error('DPM request timed out.'), { name: 'TimeoutError' });
+    });
+    await scope.runAnalysisForLatestPair();
+    assert.equal(state.analysisState.status, 'failed');
+    assert.equal(state.analysisState.failures, 1);
+    assert.equal(vm.runInContext('analysisRunGuard.busy', scope), false);
+    await scope.runAnalysisForLatestPair();
+    assert.equal(calls, 1);
+});
+
 test('explicit scan permits retry after failure and a new pair remains eligible', async () => {
     let calls = 0;
     const { scope, state, context } = harness(async () => { calls++; throw new Error('Failed'); });

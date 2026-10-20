@@ -12,6 +12,7 @@ import { checkAnalysisContext } from './src/analysis/context-limit.js';
 import { createMalformedResponseRecord, recoverAnalysisResponse } from './src/analysis/recovery.js';
 import { createAnalysisRunGuard, hasAttemptedPair, isAuxiliaryGeneration } from './src/analysis/run-guard.js';
 import { createDebugLog, describeDebugError } from './src/analysis/debug-log.js';
+import { runTimedRequest } from './src/analysis/request-timeout.js';
 import { analyseManualInstruction } from './src/analysis/manual-instruction.js';
 import { findLatestCompletedPair, fingerprintPair, hasAnalysedFingerprint, rememberAnalysedFingerprint } from './src/analysis/fingerprints.js';
 import { annotateProposalStaleness, getProposalSourceState } from './src/analysis/staleness.js';
@@ -70,6 +71,7 @@ try { debugStorage = globalThis.localStorage; } catch { /* Use memory when brows
 const debugLog = createDebugLog({ isEnabled: () => !!getSettings().debugMode, storage: debugStorage });
 const recordDebug = (event, details) => debugLog.record(event, details);
 let debugRequestId = 0;
+const dpmRequestControllers = new Set();
 let sendGuardBound = false;
 const sendControlPreviousState = new WeakMap();
 
@@ -284,30 +286,40 @@ function getSelectedAnalysisProfile() {
 async function generateDpmRaw({ prompt, responseLength, signal }) {
     const requestId = ++debugRequestId;
     const startedAt = Date.now();
+    const requestController = new AbortController();
+    const abortRequest = () => requestController.abort();
+    if (signal?.aborted) abortRequest();
+    else signal?.addEventListener('abort', abortRequest, { once: true });
+    dpmRequestControllers.add(requestController);
     beginDpmOperation();
     try {
         const profile = getSelectedAnalysisProfile();
         const contextLimit = Math.max(1000, Number(getSettings().analysisContextLimit || 6000));
         const requestPrompt = checkAnalysisContext(prompt, contextLimit);
-        recordDebug('request.started', { requestId, promptCharacters: String(requestPrompt).length, responseLength, contextLimit, route: profile ? 'dedicated-profile' : 'current-connection' });
+        const timeoutSeconds = Math.max(30, Math.min(1800, Number(getSettings().requestTimeoutSeconds) || 180));
+        const send = request => runTimedRequest({
+            request, signal: requestController.signal, timeoutMs: timeoutSeconds * 1000,
+            onProgress: details => recordDebug('request.waiting', { requestId, ...details }),
+        });
+        recordDebug('request.started', { requestId, timeoutSeconds, promptCharacters: String(requestPrompt).length, responseLength, contextLimit, route: profile ? 'dedicated-profile' : 'current-connection' });
         if (!profile) {
-            const response = await getContext().generateRaw({
+            const response = await send(requestSignal => getContext().generateRaw({
                 prompt: requestPrompt,
                 responseLength,
                 trimNames: true,
                 cacheScope: 'auxiliary',
-                signal,
-            });
+                signal: requestSignal,
+            }));
             recordDebug('request.completed', { requestId, durationMs: Date.now() - startedAt, responseCharacters: String(response ?? '').length });
             return response;
         }
 
-        const response = await ConnectionManagerRequestService.sendRequest(
+        const response = await send(requestSignal => ConnectionManagerRequestService.sendRequest(
             profile.id,
             requestPrompt,
             Number(responseLength || getSettings().responseTokenAllowance || 800),
-            { stream: false, signal, extractData: true, includePreset: true, includeInstruct: true },
-        );
+            { stream: false, signal: requestSignal, extractData: true, includePreset: true, includeInstruct: true },
+        ));
         const text = String(response?.content || response?.text || response || '').trim();
         recordDebug('request.completed', { requestId, durationMs: Date.now() - startedAt, responseCharacters: text.length });
         return text;
@@ -315,6 +327,8 @@ async function generateDpmRaw({ prompt, responseLength, signal }) {
         recordDebug('request.failed', { requestId, durationMs: Date.now() - startedAt, ...describeDebugError(error) });
         throw error;
     } finally {
+        signal?.removeEventListener('abort', abortRequest);
+        dpmRequestControllers.delete(requestController);
         endDpmOperation();
     }
 }
@@ -2129,6 +2143,7 @@ async function showDebugLog(copy = false) {
     const report = debugLog.report({
         contextLimit: Number(settings.analysisContextLimit), responseLength: Number(settings.responseTokenAllowance),
         retryLimit: Number(settings.analysisMalformedRetryLimit), failures: Number(state.analysisState?.failures || 0),
+        timeoutSeconds: Number(settings.requestTimeoutSeconds || 180),
         automaticAnalysis: !!state.chatSettings?.automaticAnalysis, paused: !!state.analysisState?.paused,
         streamlinedMode: !!state.chatSettings?.streamlinedMode, confidenceThreshold: Number(settings.confidenceThreshold),
         busy: analysisRunGuard.busy, activeOperations: activeDpmOperationCount,
@@ -2401,11 +2416,11 @@ function cancelActiveAnalysis() {
 
 function cancelAllDpmActions() {
     cancelActiveAnalysis();
+    for (const controller of dpmRequestControllers) controller.abort();
     if (scheduledAnalysisTimer !== null) {
         clearTimeout(scheduledAnalysisTimer);
         scheduledAnalysisTimer = null;
     }
-    activeDpmOperationCount = 0;
     refreshChatSendGuard();
 
     const context = getContext();
@@ -3085,6 +3100,7 @@ function injectSettingsPanel() {
                     </select>
                 </label>
                 <label>Analysis context limit <input id="dpm--analysis-context-limit" class="text_pole" type="number" min="1000" max="64000" step="500" value="${Number(settings.analysisContextLimit)}"></label>
+                <label>Request timeout (seconds) <input id="dpm--request-timeout" class="text_pole" type="number" min="30" max="1800" step="30" value="${Number(settings.requestTimeoutSeconds || 180)}"></label>
                 <label>Analysis output tokens <input id="dpm--analysis-output-tokens" class="text_pole" type="number" min="100" max="8000" step="50" value="${Number(settings.responseTokenAllowance)}"></label>
                 <label>Malformed response retries <input id="dpm--analysis-malformed-retries" class="text_pole" type="number" min="0" max="5" step="1" value="${Number(settings.analysisMalformedRetryLimit ?? 1)}"></label>
                 <label>Native conversion output tokens <input id="dpm--native-output-tokens" class="text_pole" type="number" min="500" max="12000" step="100" value="${Number(settings.nativeConversionTokenAllowance)}"></label>
@@ -3137,6 +3153,10 @@ function injectSettingsPanel() {
     });
     parent.querySelector('#dpm--analysis-output-tokens')?.addEventListener('change', event => {
         getSettings().responseTokenAllowance = Math.max(100, Number(event.target.value || 800));
+        saveSettingsDebounced();
+    });
+    parent.querySelector('#dpm--request-timeout')?.addEventListener('change', event => {
+        getSettings().requestTimeoutSeconds = Math.max(30, Math.min(1800, Number(event.target.value) || 180));
         saveSettingsDebounced();
     });
     parent.querySelector('#dpm--analysis-malformed-retries')?.addEventListener('change', event => {

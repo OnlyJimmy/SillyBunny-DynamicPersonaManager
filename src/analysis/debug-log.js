@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'dpm--debug-log-v1';
-const FIELDS = new Set(['runId', 'requestId', 'attempt', 'retryLimit', 'delay', 'durationMs', 'promptCharacters', 'responseCharacters', 'responseLength', 'contextLimit', 'route', 'reason', 'errorName', 'errorKind', 'position', 'line', 'column', 'operations', 'warnings', 'failures', 'busy', 'activeOperations', 'userIndex', 'assistantIndex', 'swipeId', 'generationType', 'ignored', 'automaticAnalysis', 'paused', 'streamlinedMode', 'confidenceThreshold']);
+const FIELDS = new Set(['runId', 'requestId', 'attempt', 'retryLimit', 'delay', 'durationMs', 'promptCharacters', 'responseCharacters', 'responseLength', 'contextLimit', 'route', 'reason', 'errorName', 'errorKind', 'position', 'line', 'column', 'operations', 'warnings', 'failures', 'busy', 'activeOperations', 'userIndex', 'assistantIndex', 'swipeId', 'generationType', 'ignored', 'automaticAnalysis', 'paused', 'streamlinedMode', 'confidenceThreshold', 'timeoutSeconds']);
 
 function safeDetails(details = {}) {
     return Object.fromEntries(Object.entries(details).filter(([key, value]) => FIELDS.has(key)
@@ -12,8 +12,9 @@ function safeDetails(details = {}) {
 export function describeDebugError(error) {
     const message = String(error?.message || '');
     const details = {
-        errorName: error?.name === 'AbortError' ? 'AbortError' : 'Error',
-        errorKind: /context limit/i.test(message) ? 'context-limit'
+        errorName: ['AbortError', 'TimeoutError'].includes(error?.name) ? error.name : 'Error',
+        errorKind: error?.name === 'TimeoutError' ? 'request-timeout'
+            : /context limit/i.test(message) ? 'context-limit'
             : /JSON|malformed|proposal version|operations must/i.test(message) ? 'invalid-json-response'
                 : /abort|cancel/i.test(message) ? 'cancelled' : 'request-or-validation-error',
     };

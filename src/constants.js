@@ -74,6 +74,7 @@ export const DEFAULT_GLOBAL_SETTINGS = Object.freeze({
     analysisMalformedRetryLimit: 1,
     analysisProfileId: '',
     analysisContextLimit: 6000,
+    requestTimeoutSeconds: 180,
     nativeConversionTokenAllowance: 1800,
     promptMode: PROMPT_MODES.compact,
     promptTokenBudget: 1200,

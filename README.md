@@ -192,6 +192,8 @@ The extension directory may appear as ignored in the upstream SillyBunny reposit
 
 ## Debug Logging
 
+DPM requests have a configurable **Request timeout (seconds)** in global extension settings (default 180, range 30–1800). Both dedicated-profile and current-connection requests are aborted on timeout; DPM releases its busy state even if the provider does not settle. Late responses are ignored. Timeouts do not trigger automatic malformed-JSON retries. Debug reports include the deadline, a waiting event every 15 seconds, and a timeout error category. **Cancel actions** also cancels outstanding DPM requests. A local abort cannot guarantee the remote provider has stopped processing. For slow reasoning models, increase the timeout or reduce the output token allowance; use **Scan latest pair** to retry after a timeout.
+
 For troubleshooting, open the drawer's **Settings → Debug log**, enable logging, and reproduce the issue. Use **Copy debug log** to paste the report into a support chat, or **View debug log** to copy it manually if clipboard access is unavailable. The log keeps the latest 200 events across chats in this browser and survives reloads. It records generation events, scheduling decisions, run/request timing, retries, response sizes, operation/warning counts, and error categories/positions. It excludes message text, persona values, prompts, raw model responses, credentials, and connection URLs. Use the separate malformed-response viewer when you need to inspect the actual model output. **Clear debug log** removes saved events; disabling logging stops collection but retains existing events.
 
 ## Known Limits
