@@ -9,6 +9,7 @@ import { ConnectionManagerRequestService } from '../../shared.js';
 import { DEFAULT_GLOBAL_SETTINGS, DISPLAY_NAME, LOCAL_STORAGE_KEYS, MODULE_NAME, PANEL_EVENT, PANEL_ID, PROMPT_MODES, SECTION_ORDER } from './src/constants.js';
 import { analysePair } from './src/analysis/analyser.js';
 import { checkAnalysisContext } from './src/analysis/context-limit.js';
+import { createMalformedResponseRecord, recoverAnalysisResponse } from './src/analysis/recovery.js';
 import { analyseManualInstruction } from './src/analysis/manual-instruction.js';
 import { findLatestCompletedPair, fingerprintPair, hasAnalysedFingerprint, rememberAnalysedFingerprint } from './src/analysis/fingerprints.js';
 import { annotateProposalStaleness, getProposalSourceState } from './src/analysis/staleness.js';
@@ -1278,6 +1279,12 @@ function renderSettingsTab(state) {
             <label class="checkbox_label"><input id="dpm--analysis-paused" type="checkbox" ${analysisState.paused ? 'checked' : ''}> Pause automatic analysis for this chat</label>
             <p class="dpm--muted">Status: ${escapeHtml(analysisState.status || 'idle')} | Failures: ${Number(analysisState.failures || 0)}</p>
             ${analysisState.lastError ? `<p class="dpm--danger-text">${escapeHtml(analysisState.lastError)}</p>` : ''}
+            ${analysisState.malformedResponse ? `<details><summary>Malformed analysis responses</summary>
+                <p>Saved in this chat. If the output ends mid-JSON, increase the analysis output token allowance and scan again.</p>
+                ${analysisState.malformedResponse.attempts.map(attempt => `<details><summary>Attempt ${Number(attempt.attempt)}</summary><p class="dpm--danger-text">${escapeHtml(attempt.error)}</p><textarea class="text_pole" rows="12" readonly>${escapeHtml(attempt.rawResponse)}</textarea></details>`).join('')}
+                <button class="dpm--action-button" type="button" data-action="edit-malformed-response">${analysisState.malformedResponse.handled ? 'View edited JSON' : 'Edit JSON and create pending changes'}</button>
+                <button class="dpm--action-button" type="button" data-action="clear-malformed-response">Clear saved responses</button>
+            </details>` : ''}
             ${warnings.length ? `<details><summary>Last validation warnings</summary><ul>${warnings.map(warning => `<li>${escapeHtml(warning.message || warning)}</li>`).join('')}</ul></details>` : ''}
             <div class="dpm--button-row">
                 <button class="dpm--action-button dpm--danger-action" type="button" data-action="cancel-dpm-actions"><i class="fa-solid fa-ban"></i><span>Cancel actions</span></button>
@@ -1325,6 +1332,14 @@ async function onPanelClick(event) {
         if (action === 'reject-all-operations') rejectAllPendingOperations();
         if (action === 'cancel-dpm-actions') cancelAllDpmActions();
         if (action === 'reanalyse-latest-pair') reanalyseLatestPair();
+        if (action === 'edit-malformed-response') await editMalformedAnalysisResponse();
+        if (action === 'clear-malformed-response') {
+            const context = getContext();
+            const { state } = readChatState(context);
+            state.analysisState.malformedResponse = null;
+            writeChatState(context, state, { immediate: true });
+            renderPanel();
+        }
         if (action === 'analyse-manual-instruction') await analyseManualInstructionFromPromptTab();
         if (action === 'navigate-source') await navigateToSourceMessage(Number(button.dataset.messageId), button.dataset.swipeId === '' ? null : Number(button.dataset.swipeId));
         if (action === 'restore-checkpoint') await restoreCheckpoint(button.dataset.checkpointId);
@@ -2068,6 +2083,61 @@ async function analyseManualInstructionFromPromptTab() {
     notify(`Created ${result.proposal.operations.length} pending manual change${result.proposal.operations.length === 1 ? '' : 's'}.`);
 }
 
+async function editMalformedAnalysisResponse() {
+    const context = getContext();
+    const { state: initialState } = readChatState(context);
+    const record = initialState.analysisState.malformedResponse;
+    if (!record) throw new Error('No malformed analysis response is saved.');
+    if (record.handled) {
+        await callGenericPopup(`<h3>Saved analysis JSON</h3><textarea class="text_pole" rows="18" readonly>${escapeHtml(record.draft)}</textarea><p>This analysis has already been handled.</p>`, POPUP_TYPE.TEXT, '', { wide: true });
+        return;
+    }
+    let draft = record.draft;
+    let errorText = '';
+    while (true) {
+        const input = await callGenericPopup(
+            `<h3>Edit malformed analysis JSON</h3><p>Fix the JSON, then submit it for validation. Valid changes go to Pending for review, including in Streamlined Mode.</p>${errorText ? `<p class="dpm--danger-text">${escapeHtml(errorText)}</p>` : ''}`,
+            POPUP_TYPE.INPUT, draft, { rows: 18, wide: true, okButton: 'Validate and create pending changes' },
+        );
+        if (!input) return;
+        draft = String(input);
+        const { state, readOnly } = readChatState(context);
+        if (getContext().chatMetadata !== context.chatMetadata || readOnly || !state.enabled || !state.persona) {
+            throw new Error('The active chat or persona is no longer available.');
+        }
+        const current = state.analysisState.malformedResponse;
+        if (!current || current.createdAt !== record.createdAt || current.handled) {
+            throw new Error('The saved response changed while the editor was open. Reopen it from Settings.');
+        }
+        current.draft = draft;
+        writeChatState(context, state, { immediate: true });
+        try {
+            if (state.pendingProposals.some(proposal => proposal.source?.fingerprint === current.fingerprint)) {
+                throw new Error('This message pair already has pending changes. Review them or scan again.');
+            }
+            const result = recoverAnalysisResponse({ record: current, text: draft, persona: state.persona, chat: context.chat, settings: getSettings() });
+            state.analysisState.lastWarnings = result.warnings || [];
+            if (result.proposal) state.pendingProposals.push(result.proposal);
+            if (result.warnings.length && !result.proposal) {
+                throw new Error(result.warnings.map(warning => warning.message).join('\n'));
+            }
+            current.handled = true;
+            state.analysisState.lastError = '';
+            state.analysisState.failures = 0;
+            state.analysisState.status = state.analysisState.paused ? 'paused' : 'idle';
+            rememberAnalysedFingerprint(state.analysisState, current.fingerprint);
+            writeChatState(context, state, { immediate: true });
+            activeTab = result.proposal ? 'pending' : 'settings';
+            renderPanel();
+            refreshHandleState(state);
+            notify(result.proposal ? 'Corrected analysis saved as pending changes for review.' : 'Corrected analysis contains no changes.');
+            return;
+        } catch (error) {
+            errorText = error.message;
+        }
+    }
+}
+
 function reanalyseLatestPair() {
     if (!forceReanalyseLatestPair(0)) throw new Error('No completed user/assistant pair is available to reanalyse.');
     notify('Reanalysis queued.');
@@ -2305,6 +2375,7 @@ async function runAnalysisForLatestPair() {
     const pair = findLatestCompletedPair(context.chat);
     if (!pair) return;
     const fingerprint = fingerprintPair(pair);
+    const analysisPersona = cloneJson(state.persona);
     if (hasAnalysedFingerprint(state.analysisState, fingerprint)) {
         return;
     }
@@ -2340,6 +2411,12 @@ async function runAnalysisForLatestPair() {
         rememberAnalysedFingerprint(state.analysisState, fingerprint);
         state.analysisState.lastAnalysedAt = new Date().toISOString();
         state.analysisState.lastWarnings = result.warnings || [];
+        if (result.malformedResponses?.length) {
+            state.analysisState.malformedResponse = createMalformedResponseRecord({ attempts: result.malformedResponses, persona: analysisPersona, pair, handled: true });
+        }
+        if (state.analysisState.malformedResponse?.fingerprint === fingerprint) {
+            state.analysisState.malformedResponse.handled = true;
+        }
         state.analysisState.lastError = '';
         state.analysisState.lockedSkipNotice = result.lockedSkippedCount
             ? {
@@ -2385,6 +2462,9 @@ async function runAnalysisForLatestPair() {
         state.analysisState.status = 'failed';
         state.analysisState.failures = Number(state.analysisState.failures || 0) + 1;
         state.analysisState.lastError = error.message;
+        if (error.malformedResponses?.length) {
+            state.analysisState.malformedResponse = createMalformedResponseRecord({ attempts: error.malformedResponses, persona: analysisPersona, pair });
+        }
         if (state.analysisState.failures >= Number(settings.failurePauseThreshold ?? 3)) {
             state.analysisState.paused = true;
             state.analysisState.status = 'paused';

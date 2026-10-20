@@ -106,6 +106,7 @@ export function createDefaultChatState() {
             lastAnalysedFingerprint: '',
             analysedFingerprints: [],
             lastError: '',
+            malformedResponse: null,
             lastWarnings: [],
             lastAnalysedAt: '',
             lockedSkipNotice: null,

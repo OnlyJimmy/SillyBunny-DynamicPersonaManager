@@ -13,9 +13,23 @@ function extractJsonText(text) {
 }
 
 function repairJsonText(text) {
-    return text
-        .replace(/,\s*([}\]])/g, '$1')
-        .trim();
+    let result = '';
+    let inString = false;
+    let escaped = false;
+    for (let index = 0; index < text.length; index += 1) {
+        const character = text[index];
+        if (inString) {
+            if (escaped) escaped = false;
+            else if (character === '\\') escaped = true;
+            else if (character === '"') inString = false;
+        } else if (character === '"') {
+            inString = true;
+        } else if (character === ',' && /^\s*[}\]]/.test(text.slice(index + 1))) {
+            continue;
+        }
+        result += character;
+    }
+    return result.trim();
 }
 
 export function parseAnalysisResponse(text) {

@@ -89,6 +89,10 @@ Every analysis includes formatting templates for all managed sections, including
 
 If the complete request exceeds the configured Analysis context limit, analysis reports an error asking you to increase that limit. DPM does not silently truncate section templates, state, or message evidence. The limit uses a character-based token estimate; actual model token counts may differ.
 
+Analysis requests explicitly require a single complete JSON object, with correct quoting and escaping and no commentary or markdown. Models can still return malformed or truncated output. In the drawer's Settings tab, **Malformed analysis responses** shows the raw output and parse error from each failed attempt of the latest affected automatic analysis, including attempts recovered by an automatic retry. These responses are saved in the chat until cleared or replaced by another affected analysis.
+
+Use **Edit JSON and create pending changes** to correct a failed response. Submitted drafts are retained if validation fails. Corrected operations pass the normal evidence, confidence, lock, and simulation checks, and always go to Pending for review, even in Streamlined Mode. Recovery requires the same persona and latest message pair/swipe; otherwise scan again. Responses already handled cannot be submitted twice. If output ends mid-JSON, increase the analysis output token allowance in global settings and scan again.
+
 DPM then:
 
 1. Parses the response, retrying malformed output if configured.
