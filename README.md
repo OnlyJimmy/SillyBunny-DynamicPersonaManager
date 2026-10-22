@@ -83,6 +83,8 @@ The SillyBunny extension settings panel includes:
 
 ## Analysis Pipeline
 
+Dedicated analysis connections explicitly send `type: "quiet"`, use the auxiliary cache scope, and pin the saved profile model through Connection Manager. This also applies to profiles without a completion preset. DPM reports an error when a configured profile is missing or has no saved model rather than falling back to the current roleplay connection. Debug logs include a `request.profile-selected` event with the request type and whether the profile has a preset; profile credentials and URLs are excluded.
+
 When automatic analysis is enabled, DPM inspects the latest completed user/assistant pair after generation. The analyser must return JSON operations, not a replacement persona.
 
 Every analysis includes formatting templates for all managed sections, including empty collections, followed by a JSON snapshot of current state and the message pair. The instructions cover adding new entries, updating matching entries by exact field path, and removing obsolete entries without duplicating existing data. Analysis-hidden values are omitted while array indices are preserved; disabled custom sections are excluded. Custom analyser instructions supplement the built-in format and editing rules.

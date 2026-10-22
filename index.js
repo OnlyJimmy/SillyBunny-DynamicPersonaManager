@@ -280,7 +280,12 @@ function getConnectionProfiles() {
 function getSelectedAnalysisProfile() {
     const profileId = getSettings().analysisProfileId;
     if (!profileId) return null;
-    return getConnectionProfiles().find(profile => profile.id === profileId) || null;
+    const profile = getConnectionProfiles().find(profile => profile.id === profileId);
+    if (!profile) throw new Error('The selected DPM analysis connection profile no longer exists. Select an available profile in DPM settings.');
+    if (typeof profile.model !== 'string' || !profile.model.trim()) {
+        throw new Error('The selected DPM analysis connection profile has no saved model. Save its model in Connection Manager, then select it again in DPM settings.');
+    }
+    return profile;
 }
 
 async function generateDpmRaw({ prompt, responseLength, signal }) {
@@ -301,6 +306,7 @@ async function generateDpmRaw({ prompt, responseLength, signal }) {
             request, signal: requestController.signal, timeoutMs: timeoutSeconds * 1000,
             onProgress: details => recordDebug('request.waiting', { requestId, ...details }),
         });
+        if (profile) recordDebug('request.profile-selected', { requestId, requestType: 'quiet', profileHasPreset: !!profile.preset, profileModelPinned: true });
         recordDebug('request.started', { requestId, timeoutSeconds, promptCharacters: String(requestPrompt).length, responseLength, contextLimit, route: profile ? 'dedicated-profile' : 'current-connection' });
         if (!profile) {
             const response = await send(requestSignal => getContext().generateRaw({
@@ -318,9 +324,16 @@ async function generateDpmRaw({ prompt, responseLength, signal }) {
             profile.id,
             requestPrompt,
             Number(responseLength || getSettings().responseTokenAllowance || 800),
-            { stream: false, signal: requestSignal, extractData: true, includePreset: true, includeInstruct: true },
+            { stream: false, signal: requestSignal, extractData: true, includePreset: true, includeInstruct: true, modelOverride: profile.model },
+            // Connection Manager's bare request does not set a generation type.
+            // Supply it even when the profile has no completion preset to expand.
+            { type: 'quiet', cacheScope: 'auxiliary', stream: false },
         ));
-        const text = String(response?.content || response?.text || response || '').trim();
+        // Shared profile requests return an extracted object, not necessarily text.
+        // Preserve empty content rather than turning it into "[object Object]".
+        const content = typeof response === 'string' ? response : response?.content ?? response?.text;
+        if (typeof content !== 'string') throw new Error('The DPM analysis profile returned an unsupported response format instead of text.');
+        const text = content.trim();
         recordDebug('request.completed', { requestId, durationMs: Date.now() - startedAt, responseCharacters: text.length });
         return text;
     } catch (error) {
