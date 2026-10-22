@@ -2,7 +2,7 @@ const STORAGE_KEY = 'dpm--debug-log-v1';
 const FIELDS = new Set(['runId', 'requestId', 'attempt', 'retryLimit', 'delay', 'durationMs', 'promptCharacters', 'responseCharacters', 'responseLength', 'contextLimit', 'route', 'reason', 'errorName', 'errorKind', 'position', 'line', 'column', 'operations', 'warnings', 'failures', 'busy', 'activeOperations', 'userIndex', 'assistantIndex', 'swipeId', 'generationType', 'ignored', 'automaticAnalysis', 'paused', 'streamlinedMode', 'confidenceThreshold', 'timeoutSeconds']);
 
 function safeDetails(details = {}) {
-    return Object.fromEntries(Object.entries(details).filter(([key, value]) => (FIELDS.has(key) || ['requestType', 'profileHasPreset', 'profileModelPinned'].includes(key))
+    return Object.fromEntries(Object.entries(details).filter(([key, value]) => (FIELDS.has(key) || ['requestType', 'profileHasPreset', 'profileModelPinned', 'httpStatus', 'reasoningCharacters', 'finishReason'].includes(key))
         && (typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value))
             || (typeof value === 'string' && /^[a-zA-Z0-9_. -]{0,100}$/.test(value)))));
 }

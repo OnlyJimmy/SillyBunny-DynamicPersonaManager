@@ -83,6 +83,10 @@ The SillyBunny extension settings panel includes:
 
 ## Analysis Pipeline
 
+For a connection that bypasses Connection Manager, choose **Independent DPM connection** in global DPM settings. Enter an OpenAI-compatible API base URL (including `/v1` if your provider requires it), the provider's exact model ID, and an API key. Use **Test connection** before scanning. The test sends a small generic prompt and does not change persona state. Endpoint and model are saved; the key stays in memory until reload and can be removed with **Clear API key**. Blank keys are supported for unauthenticated local endpoints.
+
+Independent requests use SillyBunny's same-origin server relay with an explicit endpoint, model, key, and minimal generation parameters. They bypass profile lookup, preset application, and the active roleplay connection. They currently support the OpenAI Chat Completions protocol, not native Anthropic, Gemini, or Responses endpoints. Existing timeout, cancellation, parsing, and operation-validation safeguards still apply. Debug logs show HTTP status, response/reasoning lengths, and finish reason without response text or credentials. The server's own prompt/payload diagnostics remain controlled by SillyBunny.
+
 Dedicated analysis connections explicitly send `type: "quiet"`, use the auxiliary cache scope, and pin the saved profile model through Connection Manager. This also applies to profiles without a completion preset. DPM reports an error when a configured profile is missing or has no saved model rather than falling back to the current roleplay connection. Debug logs include a `request.profile-selected` event with the request type and whether the profile has a preset; profile credentials and URLs are excluded.
 
 When automatic analysis is enabled, DPM inspects the latest completed user/assistant pair after generation. The analyser must return JSON operations, not a replacement persona.

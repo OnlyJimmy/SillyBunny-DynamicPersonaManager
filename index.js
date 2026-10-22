@@ -2,7 +2,7 @@ import { extension_settings, getContext } from '../../../extensions.js';
 import { POPUP_RESULT, POPUP_TYPE, Popup, callGenericPopup } from '../../../popup.js';
 import { download, escapeHtml } from '../../../utils.js';
 import { SWIPE_DIRECTION, SWIPE_SOURCE } from '../../../constants.js';
-import { extension_prompt_roles, extension_prompt_types, name1, saveSettingsDebounced, setExtensionPrompt, swipe } from '../../../../script.js';
+import { extension_prompt_roles, extension_prompt_types, getRequestHeaders, name1, saveSettingsDebounced, setExtensionPrompt, swipe } from '../../../../script.js';
 import { power_user } from '../../../power-user.js';
 import { user_avatar } from '../../../personas.js';
 import { ConnectionManagerRequestService } from '../../shared.js';
@@ -13,6 +13,7 @@ import { createMalformedResponseRecord, recoverAnalysisResponse } from './src/an
 import { createAnalysisRunGuard, hasAttemptedPair, isAuxiliaryGeneration } from './src/analysis/run-guard.js';
 import { createDebugLog, describeDebugError } from './src/analysis/debug-log.js';
 import { runTimedRequest } from './src/analysis/request-timeout.js';
+import { sendIndependentRequest } from './src/analysis/independent-connection.js';
 import { analyseManualInstruction } from './src/analysis/manual-instruction.js';
 import { findLatestCompletedPair, fingerprintPair, hasAnalysedFingerprint, rememberAnalysedFingerprint } from './src/analysis/fingerprints.js';
 import { annotateProposalStaleness, getProposalSourceState } from './src/analysis/staleness.js';
@@ -72,6 +73,7 @@ const debugLog = createDebugLog({ isEnabled: () => !!getSettings().debugMode, st
 const recordDebug = (event, details) => debugLog.record(event, details);
 let debugRequestId = 0;
 const dpmRequestControllers = new Set();
+let independentApiKey = '';
 let sendGuardBound = false;
 const sendControlPreviousState = new WeakMap();
 
@@ -298,7 +300,8 @@ async function generateDpmRaw({ prompt, responseLength, signal }) {
     dpmRequestControllers.add(requestController);
     beginDpmOperation();
     try {
-        const profile = getSelectedAnalysisProfile();
+        const independent = getSettings().analysisConnectionMode === 'independent';
+        const profile = independent ? null : getSelectedAnalysisProfile();
         const contextLimit = Math.max(1000, Number(getSettings().analysisContextLimit || 6000));
         const requestPrompt = checkAnalysisContext(prompt, contextLimit);
         const timeoutSeconds = Math.max(30, Math.min(1800, Number(getSettings().requestTimeoutSeconds) || 180));
@@ -307,7 +310,16 @@ async function generateDpmRaw({ prompt, responseLength, signal }) {
             onProgress: details => recordDebug('request.waiting', { requestId, ...details }),
         });
         if (profile) recordDebug('request.profile-selected', { requestId, requestType: 'quiet', profileHasPreset: !!profile.preset, profileModelPinned: true });
-        recordDebug('request.started', { requestId, timeoutSeconds, promptCharacters: String(requestPrompt).length, responseLength, contextLimit, route: profile ? 'dedicated-profile' : 'current-connection' });
+        recordDebug('request.started', { requestId, timeoutSeconds, promptCharacters: String(requestPrompt).length, responseLength, contextLimit, route: independent ? 'independent' : profile ? 'dedicated-profile' : 'current-connection' });
+        if (independent) {
+            const text = await send(requestSignal => sendIndependentRequest({
+                settings: getSettings(), apiKey: independentApiKey, prompt: requestPrompt, responseLength,
+                signal: requestSignal, headers: getRequestHeaders(),
+                onDebug: (event, details) => recordDebug(event, { requestId, ...details }),
+            }));
+            recordDebug('request.completed', { requestId, durationMs: Date.now() - startedAt, responseCharacters: text.length });
+            return text;
+        }
         if (!profile) {
             const response = await send(requestSignal => getContext().generateRaw({
                 prompt: requestPrompt,
@@ -2161,7 +2173,7 @@ async function showDebugLog(copy = false) {
         streamlinedMode: !!state.chatSettings?.streamlinedMode, confidenceThreshold: Number(settings.confidenceThreshold),
         busy: analysisRunGuard.busy, activeOperations: activeDpmOperationCount,
         reason: state.analysisState?.status || 'idle',
-        route: settings.analysisProfileId ? 'dedicated-profile' : 'current-connection',
+        route: settings.analysisConnectionMode === 'independent' ? 'independent' : settings.analysisProfileId ? 'dedicated-profile' : 'current-connection',
     });
     if (copy) {
         try {
@@ -3107,6 +3119,21 @@ function injectSettingsPanel() {
                 <label class="checkbox_label"><input id="dpm--global-auto" type="checkbox" ${settings.automaticAnalysisDefault ? 'checked' : ''}> Enable automatic analysis by default after chat activation</label>
                 <label class="checkbox_label"><input id="dpm--block-send-during-operation" type="checkbox" ${settings.blockChatSendDuringOperation ? 'checked' : ''}> Disable chat sending while DPM is analysing or converting</label>
                 <label>Dedicated analysis connection
+                    <select id="dpm--connection-mode" class="text_pole">
+                        <option value="existing" ${settings.analysisConnectionMode !== 'independent' ? 'selected' : ''}>SillyBunny connection/profile</option>
+                        <option value="independent" ${settings.analysisConnectionMode === 'independent' ? 'selected' : ''}>Independent DPM connection</option>
+                    </select>
+                </label>
+                <fieldset id="dpm--independent-connection" ${settings.analysisConnectionMode === 'independent' ? '' : 'hidden'}>
+                    <legend>Independent DPM connection (OpenAI-compatible)</legend>
+                    <label>API base URL <input id="dpm--independent-url" class="text_pole" type="url" value="${escapeHtml(settings.independentBaseUrl || '')}" placeholder="https://provider.example/v1"></label>
+                    <label>Model ID <input id="dpm--independent-model" class="text_pole" type="text" value="${escapeHtml(settings.independentModel || '')}"></label>
+                    <label>API key <input id="dpm--independent-key" class="text_pole" type="password" autocomplete="off" placeholder="${independentApiKey ? 'Key set for this page session' : 'Enter key (blank for unauthenticated endpoints)'}"></label>
+                    <p class="dpm--muted">Uses SillyBunny's server relay without profiles or presets. The key stays in memory; enter it again after reload.</p>
+                    <button id="dpm--independent-test" type="button" class="menu_button">Test connection</button>
+                    <button id="dpm--independent-clear" type="button" class="menu_button">Clear API key</button>
+                </fieldset>
+                <label id="dpm--profile-label" ${settings.analysisConnectionMode === 'independent' ? 'hidden' : ''}>SillyBunny analysis profile
                     <select id="dpm--analysis-profile" class="text_pole">
                         <option value="">Use current chat connection</option>
                         ${profiles.map(profile => `<option value="${escapeHtml(profile.id)}" ${settings.analysisProfileId === profile.id ? 'selected' : ''}>${escapeHtml(profile.name || profile.id)}</option>`).join('')}
@@ -3159,6 +3186,34 @@ function injectSettingsPanel() {
     parent.querySelector('#dpm--analysis-profile')?.addEventListener('change', event => {
         getSettings().analysisProfileId = String(event.target.value || '');
         saveSettingsDebounced();
+    });
+    parent.querySelector('#dpm--connection-mode')?.addEventListener('change', event => {
+        getSettings().analysisConnectionMode = event.target.value === 'independent' ? 'independent' : 'existing';
+        parent.querySelector('#dpm--independent-connection').hidden = event.target.value !== 'independent';
+        parent.querySelector('#dpm--profile-label').hidden = event.target.value === 'independent';
+        saveSettingsDebounced();
+    });
+    for (const [selector, setting] of [['#dpm--independent-url', 'independentBaseUrl'], ['#dpm--independent-model', 'independentModel']]) {
+        parent.querySelector(selector)?.addEventListener('input', event => {
+            getSettings()[setting] = event.target.value.trim();
+            saveSettingsDebounced();
+        });
+    }
+    parent.querySelector('#dpm--independent-key')?.addEventListener('input', event => { independentApiKey = event.target.value.trim(); });
+    parent.querySelector('#dpm--independent-clear')?.addEventListener('click', () => {
+        independentApiKey = '';
+        parent.querySelector('#dpm--independent-key').value = '';
+        parent.querySelector('#dpm--independent-key').placeholder = 'Enter key (blank for unauthenticated endpoints)';
+        notify('DPM API key cleared.');
+    });
+    parent.querySelector('#dpm--independent-test')?.addEventListener('click', async event => {
+        const button = event.currentTarget;
+        button.disabled = true;
+        try {
+            const text = await generateDpmRaw({ prompt: 'Connection test. Reply with exactly: DPM connection OK', responseLength: 1024 });
+            notify(text ? 'Independent DPM connection returned assistant text successfully.' : 'Connection returned no text.', text ? 'info' : 'warning');
+        } catch (error) { notify(error.message, 'error'); }
+        finally { button.disabled = false; }
     });
     parent.querySelector('#dpm--analysis-context-limit')?.addEventListener('change', event => {
         getSettings().analysisContextLimit = Math.max(1000, Number(event.target.value || 6000));
